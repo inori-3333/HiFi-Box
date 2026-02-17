@@ -40,7 +40,21 @@ type SpatialTrial = {
   revealed: boolean;
 };
 
-const SPATIAL_TARGETS: SpatialPoint[] = [
+type SpatialPlane = "xy" | "xz" | "zy";
+type SpatialMode = "2d" | "3d";
+
+const SPATIAL_TARGETS_3D: SpatialPoint[] = [
+  { x: -0.82, y: 0.2, z: 0.78 },
+  { x: -0.64, y: -0.68, z: 0.35 },
+  { x: 0.16, y: 0.72, z: 0.66 },
+  { x: 0.74, y: -0.28, z: 0.44 },
+  { x: -0.34, y: 0.46, z: -0.82 },
+  { x: 0.57, y: -0.18, z: -0.74 },
+  { x: 0.88, y: 0.61, z: -0.22 },
+  { x: -0.18, y: -0.74, z: -0.58 }
+];
+
+const SPATIAL_TARGETS_2D: SpatialPoint[] = [
   { x: -0.85, y: -0.45, z: 0.2 },
   { x: -0.65, y: 0.2, z: 0.55 },
   { x: -0.4, y: -0.75, z: 0.35 },
@@ -50,6 +64,22 @@ const SPATIAL_TARGETS: SpatialPoint[] = [
   { x: 0.75, y: -0.2, z: 0.25 },
   { x: 0.9, y: 0.55, z: 0.7 }
 ];
+
+const MAX_CART_DISTANCE = Math.sqrt(12);
+
+function clamp01ToSigned(value: number): number {
+  return Math.max(-1, Math.min(1, value));
+}
+
+function planePointToPercent(point: SpatialPoint, plane: SpatialPlane): { left: string; top: string } {
+  if (plane === "xy") {
+    return { left: `${((point.x + 1) / 2) * 100}%`, top: `${(1 - (point.y + 1) / 2) * 100}%` };
+  }
+  if (plane === "xz") {
+    return { left: `${((point.x + 1) / 2) * 100}%`, top: `${(1 - (point.z + 1) / 2) * 100}%` };
+  }
+  return { left: `${((point.z + 1) / 2) * 100}%`, top: `${(1 - (point.y + 1) / 2) * 100}%` };
+}
 
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
@@ -66,6 +96,7 @@ export default function App() {
   const [spatialTrials, setSpatialTrials] = useState<SpatialTrial[]>([]);
   const [spatialIndex, setSpatialIndex] = useState(0);
   const [spatialGuess, setSpatialGuess] = useState<SpatialPoint | null>(null);
+  const [spatialMode, setSpatialMode] = useState<SpatialMode>("3d");
   const audioContextRef = useRef<AudioContext | null>(null);
   const [sweepAcq, setSweepAcq] = useState<SweepAcquisitionConfig>({
     tone_duration_ms: 180,
@@ -118,8 +149,9 @@ export default function App() {
     }
   }
 
-  function startSpatialTest() {
-    const shuffled = [...SPATIAL_TARGETS].sort(() => Math.random() - 0.5).slice(0, 6);
+  function startSpatialTest(mode: SpatialMode) {
+    const source = mode === "2d" ? SPATIAL_TARGETS_2D : SPATIAL_TARGETS_3D;
+    const shuffled = [...source].sort(() => Math.random() - 0.5).slice(0, 6);
     const trials = shuffled.map((target, idx) => ({
       id: idx + 1,
       target,
@@ -127,9 +159,14 @@ export default function App() {
     }));
     setSpatialTrials(trials);
     setSpatialIndex(0);
-    setSpatialGuess(null);
+    setSpatialMode(mode);
+    setSpatialGuess(mode === "2d" ? { x: 0, y: 0, z: 0.5 } : { x: 0, y: 0, z: 0 });
     setStage("spatial");
-    setStatus("空间测试已开始：播放提示音并选择你感知的声源位置");
+    setStatus(
+      mode === "2d"
+        ? "2D 空间测试已开始：请播放提示音并在平面区域中定位，再用滑条设置深度"
+        : "3D 空间测试已开始：请播放提示音并在直角坐标三视图中选择声源位置"
+    );
   }
 
   function getAudioContext(): AudioContext {
@@ -149,49 +186,97 @@ export default function App() {
       await ctx.resume();
     }
 
-    const durationSec = 1.2;
-    const frameCount = Math.floor(ctx.sampleRate * durationSec);
-    const buffer = ctx.createBuffer(1, frameCount, ctx.sampleRate);
-    const channelData = buffer.getChannelData(0);
-    for (let i = 0; i < frameCount; i += 1) {
-      channelData[i] = (Math.random() * 2 - 1) * 0.35;
-    }
+    const start = ctx.currentTime + 0.03;
+    const notes = [261.63, 329.63, 392.0, 523.25, 659.25];
+    const noteDuration = 0.27;
+    const normalizedDepth = spatialMode === "2d" ? trial.target.z * 2 - 1 : trial.target.z;
+    const harmonicTilt = 1 + trial.target.y * 0.08;
+    const toneCutoff = 2200 + ((normalizedDepth + 1) * 0.5) * 5600;
+    const masterGainValue = 0.18 + ((normalizedDepth + 1) * 0.5) * 0.18;
 
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
+    const panner3d = new PannerNode(ctx, {
+      panningModel: "HRTF",
+      distanceModel: "inverse",
+      positionX: trial.target.x * 1.7,
+      positionY: trial.target.y * 1.3,
+      positionZ: -normalizedDepth * 1.8,
+      refDistance: 1,
+      maxDistance: 12,
+      rolloffFactor: 1.2
+    });
 
-    const lowPass = ctx.createBiquadFilter();
-    lowPass.type = "lowpass";
-    lowPass.frequency.value = 1800 + trial.target.z * 7200;
+    const timbre = ctx.createBiquadFilter();
+    timbre.type = "lowpass";
+    timbre.frequency.value = toneCutoff;
+    timbre.Q.value = 0.6;
 
-    const gain = ctx.createGain();
-    gain.gain.value = 0.35 + trial.target.z * 0.4;
+    const master = ctx.createGain();
+    master.gain.value = masterGainValue;
 
-    const panner = ctx.createStereoPanner();
-    panner.pan.value = trial.target.x;
+    timbre.connect(master);
+    master.connect(panner3d);
+    panner3d.connect(ctx.destination);
 
-    source.connect(lowPass);
-    lowPass.connect(gain);
-    gain.connect(panner);
-    panner.connect(ctx.destination);
+    notes.forEach((baseFreq, idx) => {
+      const t = start + idx * 0.2;
+      const freq = baseFreq * harmonicTilt;
 
-    source.start();
-    source.stop(ctx.currentTime + durationSec);
+      const oscA = ctx.createOscillator();
+      oscA.type = "triangle";
+      oscA.frequency.setValueAtTime(freq, t);
+
+      const oscB = ctx.createOscillator();
+      oscB.type = "sine";
+      oscB.frequency.setValueAtTime(freq * 2, t);
+
+      const envelope = ctx.createGain();
+      envelope.gain.setValueAtTime(0.0001, t);
+      envelope.gain.exponentialRampToValueAtTime(0.26, t + 0.03);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, t + noteDuration);
+
+      oscA.connect(envelope);
+      oscB.connect(envelope);
+      envelope.connect(timbre);
+
+      oscA.start(t);
+      oscB.start(t);
+      oscA.stop(t + noteDuration + 0.03);
+      oscB.stop(t + noteDuration + 0.03);
+    });
+
     setStatus(`已播放第 ${trial.id} 题提示音，请在空间中点击你感知的位置`);
   }
 
-  function handleSpatialArenaClick(event: React.MouseEvent<HTMLDivElement>) {
+  function handleSpatialPlaneClick(event: React.MouseEvent<HTMLDivElement>, plane: SpatialPlane) {
     const rect = event.currentTarget.getBoundingClientRect();
     const px = (event.clientX - rect.left) / rect.width;
     const py = (event.clientY - rect.top) / rect.height;
-    const x = Math.max(-1, Math.min(1, px * 2 - 1));
-    const y = Math.max(-1, Math.min(1, (1 - py) * 2 - 1));
+    const horizontal = clamp01ToSigned(px * 2 - 1);
+    const vertical = clamp01ToSigned((1 - py) * 2 - 1);
+    setSpatialGuess((old) => {
+      const base = old ?? { x: 0, y: 0, z: 0 };
+      if (plane === "xy") {
+        return { ...base, x: horizontal, y: vertical };
+      }
+      if (plane === "xz") {
+        return { ...base, x: horizontal, z: vertical };
+      }
+      return { ...base, z: horizontal, y: vertical };
+    });
+  }
+
+  function handleSpatialArena2DClick(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const px = (event.clientX - rect.left) / rect.width;
+    const py = (event.clientY - rect.top) / rect.height;
+    const x = clamp01ToSigned(px * 2 - 1);
+    const y = clamp01ToSigned((1 - py) * 2 - 1);
     setSpatialGuess((old) => ({ x, y, z: old?.z ?? 0.5 }));
   }
 
   function submitSpatialGuess() {
     if (!spatialGuess) {
-      setStatus("请先点击空间区域并设置深度后再提交");
+      setStatus("请先在三视图中选择一个空间位置后再提交");
       return;
     }
     const trial = spatialTrials[spatialIndex];
@@ -199,7 +284,8 @@ export default function App() {
     const dy = spatialGuess.y - trial.target.y;
     const dz = spatialGuess.z - trial.target.z;
     const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    const scoreValue = Math.max(0, Math.min(100, 100 - (distance / 3) * 100));
+    const denominator = spatialMode === "2d" ? 3 : MAX_CART_DISTANCE;
+    const scoreValue = Math.max(0, Math.min(100, 100 - (distance / denominator) * 100));
 
     const nextTrials = spatialTrials.map((item, idx) =>
       idx === spatialIndex ? { ...item, user: spatialGuess, score: scoreValue, revealed: true } : item
@@ -214,8 +300,12 @@ export default function App() {
       return;
     }
     setSpatialIndex((v) => v + 1);
-    setSpatialGuess(null);
-    setStatus(`进入第 ${spatialIndex + 2} 题，请先播放提示音`);
+    setSpatialGuess(spatialMode === "2d" ? { x: 0, y: 0, z: 0.5 } : { x: 0, y: 0, z: 0 });
+    setStatus(
+      spatialMode === "2d"
+        ? `进入第 ${spatialIndex + 2} 题，请播放提示音并在 2D 区域定位`
+        : `进入第 ${spatialIndex + 2} 题，请播放提示音并在三视图中定位`
+    );
   }
 
   async function refreshHistory() {
@@ -382,8 +472,11 @@ export default function App() {
               <button disabled={busy} onClick={prepareDevices}>
                 新建测试
               </button>
-              <button disabled={busy} onClick={startSpatialTest}>
-                空间结像测试
+              <button disabled={busy} onClick={() => startSpatialTest("2d")}>
+                空间结像测试(2D)
+              </button>
+              <button disabled={busy} onClick={() => startSpatialTest("3d")}>
+                空间结像测试(3D)
               </button>
               <button disabled={busy} onClick={refreshHistory}>
                 刷新历史
@@ -413,9 +506,13 @@ export default function App() {
       {stage === "spatial" && spatialTrials.length > 0 && (
         <section className="grid">
           <div className="card">
-            <h2>空间结像测试</h2>
+            <h2>空间结像测试（{spatialMode.toUpperCase()}）</h2>
             <p>
-              第 {spatialIndex + 1}/{spatialTrials.length} 题。先播放提示音，再点击你听到的声源位置，提交后会揭晓标准答案。
+              第 {spatialIndex + 1}/{spatialTrials.length} 题。先播放提示音，
+              {spatialMode === "2d"
+                ? "再在 2D 空间区域点击位置并设置深度。"
+                : "再在三视图直角坐标空间中选点。"}
+              提交后揭晓标准答案。
             </p>
             <div className="row">
               <button disabled={busy} onClick={playSpatialCue}>
@@ -429,52 +526,134 @@ export default function App() {
               </button>
             </div>
             <label>
-              前后深度 (0=近, 1=远)
+              X 坐标（左-右）
               <input
                 type="range"
-                min={0}
+                min={-1}
                 max={1}
                 step={0.01}
-                value={spatialGuess?.z ?? 0.5}
-                onChange={(e) =>
-                  setSpatialGuess((old) => ({
-                    x: old?.x ?? 0,
-                    y: old?.y ?? 0,
-                    z: Number.parseFloat(e.target.value)
-                  }))
-                }
+                value={spatialGuess?.x ?? 0}
+                onChange={(e) => {
+                  const x = Number.parseFloat(e.target.value);
+                  setSpatialGuess((old) => ({ x, y: old?.y ?? 0, z: old?.z ?? 0 }));
+                }}
               />
             </label>
+            <label>
+              Y 坐标（下-上）
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={spatialGuess?.y ?? 0}
+                onChange={(e) => {
+                  const y = Number.parseFloat(e.target.value);
+                  setSpatialGuess((old) => ({ x: old?.x ?? 0, y, z: old?.z ?? 0 }));
+                }}
+              />
+            </label>
+            <label>
+              Z 坐标（后-前）
+              <input
+                type="range"
+                min={spatialMode === "2d" ? 0 : -1}
+                max={1}
+                step={0.01}
+                value={spatialGuess?.z ?? (spatialMode === "2d" ? 0.5 : 0)}
+                onChange={(e) => {
+                  const z = Number.parseFloat(e.target.value);
+                  setSpatialGuess((old) => ({ x: old?.x ?? 0, y: old?.y ?? 0, z }));
+                }}
+              />
+            </label>
+            <button onClick={() => setSpatialGuess({ x: 0, y: 0, z: spatialMode === "2d" ? 0.5 : 0 })}>
+              重置到中心点
+            </button>
+            <p className="hint">
+              当前选择: X {spatialGuess?.x.toFixed(2) ?? "0.00"} / Y {spatialGuess?.y.toFixed(2) ?? "0.00"} / Z{" "}
+              {spatialGuess?.z.toFixed(2) ?? "0.00"}
+            </p>
           </div>
 
-          <div className="card">
-            <h2>3D 空间区域</h2>
-            <div className="spatial-arena" onClick={handleSpatialArenaClick}>
-              <div className="spatial-self" />
-              {spatialGuess && (
-                <div
-                  className="spatial-dot spatial-user"
-                  style={{
-                    left: `${((spatialGuess.x + 1) / 2) * 100}%`,
-                    top: `${(1 - (spatialGuess.y + 1) / 2) * 100}%`
-                  }}
-                />
-              )}
-              {spatialTrials[spatialIndex].revealed && (
-                <div
-                  className="spatial-dot spatial-target"
-                  style={{
-                    left: `${((spatialTrials[spatialIndex].target.x + 1) / 2) * 100}%`,
-                    top: `${(1 - (spatialTrials[spatialIndex].target.y + 1) / 2) * 100}%`
-                  }}
-                />
-              )}
+          {spatialMode === "3d" ? (
+            <div className="card">
+              <h2>直角坐标空间（三视图）</h2>
+              <div className="plane-layout">
+                <div className="plane-wrap">
+                  <p className="plane-title">XY 正视图</p>
+                  <div className="cartesian-plane" onClick={(e) => handleSpatialPlaneClick(e, "xy")}>
+                    <div className="plane-axis-x" />
+                    <div className="plane-axis-y" />
+                    {spatialGuess && <div className="spatial-dot spatial-user" style={planePointToPercent(spatialGuess, "xy")} />}
+                    {spatialTrials[spatialIndex].revealed && (
+                      <div
+                        className="spatial-dot spatial-target"
+                        style={planePointToPercent(spatialTrials[spatialIndex].target, "xy")}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="plane-wrap">
+                  <p className="plane-title">XZ 俯视图</p>
+                  <div className="cartesian-plane" onClick={(e) => handleSpatialPlaneClick(e, "xz")}>
+                    <div className="plane-axis-x" />
+                    <div className="plane-axis-y" />
+                    {spatialGuess && <div className="spatial-dot spatial-user" style={planePointToPercent(spatialGuess, "xz")} />}
+                    {spatialTrials[spatialIndex].revealed && (
+                      <div
+                        className="spatial-dot spatial-target"
+                        style={planePointToPercent(spatialTrials[spatialIndex].target, "xz")}
+                      />
+                    )}
+                  </div>
+                </div>
+                <div className="plane-wrap">
+                  <p className="plane-title">ZY 侧视图</p>
+                  <div className="cartesian-plane" onClick={(e) => handleSpatialPlaneClick(e, "zy")}>
+                    <div className="plane-axis-x" />
+                    <div className="plane-axis-y" />
+                    {spatialGuess && <div className="spatial-dot spatial-user" style={planePointToPercent(spatialGuess, "zy")} />}
+                    {spatialTrials[spatialIndex].revealed && (
+                      <div
+                        className="spatial-dot spatial-target"
+                        style={planePointToPercent(spatialTrials[spatialIndex].target, "zy")}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+              <p className="hint">蓝点=你的选择，红点=标准答案。点击任意视图即可更新对应坐标轴。</p>
+              {spatialTrials[spatialIndex].revealed && <p>本题得分: {spatialTrials[spatialIndex].score?.toFixed(1)}</p>}
             </div>
-            <p className="hint">蓝点=你的选择，红点=标准答案，中心小点=你所在位置</p>
-            {spatialTrials[spatialIndex].revealed && (
-              <p>本题得分: {spatialTrials[spatialIndex].score?.toFixed(1)}</p>
-            )}
-          </div>
+          ) : (
+            <div className="card">
+              <h2>2D 空间区域（旧版）</h2>
+              <div className="spatial-arena2d" onClick={handleSpatialArena2DClick}>
+                <div className="spatial-self-2d" />
+                {spatialGuess && (
+                  <div
+                    className="spatial-dot spatial-user"
+                    style={{
+                      left: `${((spatialGuess.x + 1) / 2) * 100}%`,
+                      top: `${(1 - (spatialGuess.y + 1) / 2) * 100}%`
+                    }}
+                  />
+                )}
+                {spatialTrials[spatialIndex].revealed && (
+                  <div
+                    className="spatial-dot spatial-target"
+                    style={{
+                      left: `${((spatialTrials[spatialIndex].target.x + 1) / 2) * 100}%`,
+                      top: `${(1 - (spatialTrials[spatialIndex].target.y + 1) / 2) * 100}%`
+                    }}
+                  />
+                )}
+              </div>
+              <p className="hint">蓝点=你的选择，红点=标准答案，中心点=你所在位置</p>
+              {spatialTrials[spatialIndex].revealed && <p>本题得分: {spatialTrials[spatialIndex].score?.toFixed(1)}</p>}
+            </div>
+          )}
 
           <div className="card">
             <h2>测试汇总</h2>

@@ -129,7 +129,57 @@ td {
   border-bottom: 1px solid #d5e6d1;
 }
 
-.spatial-arena {
+.plane-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.plane-wrap {
+  background: #f3fbef;
+  border: 1px solid #caded4;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.plane-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #34533e;
+}
+
+.cartesian-plane {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border: 1px solid #aac3a3;
+  border-radius: 8px;
+  background-image: linear-gradient(to right, rgba(58, 96, 64, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(58, 96, 64, 0.1) 1px, transparent 1px);
+  background-size: 20% 20%;
+  background-color: #f8fff5;
+  cursor: crosshair;
+}
+
+.plane-axis-x {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(51, 80, 52, 0.55);
+}
+
+.plane-axis-y {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(51, 80, 52, 0.55);
+}
+
+.spatial-arena2d {
   position: relative;
   width: 100%;
   max-width: 360px;
@@ -141,7 +191,7 @@ td {
   cursor: crosshair;
 }
 
-.spatial-self {
+.spatial-self-2d {
   position: absolute;
   width: 10px;
   height: 10px;
@@ -162,10 +212,12 @@ td {
 
 .spatial-user {
   background: #3280d6;
+  border: 1px solid rgba(255, 255, 255, 0.8);
 }
 
 .spatial-target {
   background: #d44d43;
+  border: 1px solid rgba(255, 255, 255, 0.8);
 }
 
 .statusbar {
