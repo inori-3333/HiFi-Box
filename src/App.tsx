@@ -67,6 +67,7 @@ const SPATIAL_TARGETS_2D: SpatialPoint[] = [
 ];
 
 const MAX_CART_DISTANCE = Math.sqrt(12);
+const SPATIAL_REFERENCE_FREQ_HZ = 392;
 
 function clamp01ToSigned(value: number): number {
   return Math.max(-1, Math.min(1, value));
@@ -86,6 +87,15 @@ function normalizeDepth(mode: SpatialMode, z: number): number {
   return mode === "2d" ? z * 2 - 1 : z;
 }
 
+function spatialPannerPosition(mode: SpatialMode, point: SpatialPoint): { x: number; y: number; z: number } {
+  const normalizedDepth = normalizeDepth(mode, point.z);
+  return {
+    x: point.x * 1.7,
+    y: point.y * 1.3,
+    z: -normalizedDepth * 1.8
+  };
+}
+
 function baselineSweepPoint(progress: number, mode: SpatialMode): SpatialPoint {
   const rows = 7;
   const rowFloat = Math.min(progress * rows, rows - 1e-6);
@@ -96,6 +106,27 @@ function baselineSweepPoint(progress: number, mode: SpatialMode): SpatialPoint {
   const y = 1 - (rowIndex / (rows - 1)) * 2;
   const z = mode === "2d" ? 0.5 : 0;
   return { x, y, z };
+}
+
+function planarLoudness(point: SpatialPoint): number {
+  const radial = Math.min(1, Math.hypot(point.x, point.y));
+  const centerBoost = (1 - radial) * 0.09;
+  const verticalLift = ((point.y + 1) * 0.5) * 0.03;
+  return Math.max(0.12, Math.min(0.28, 0.14 + centerBoost + verticalLift));
+}
+
+function createSpatialPanner(ctx: AudioContext, mode: SpatialMode, point: SpatialPoint): PannerNode {
+  const mapped = spatialPannerPosition(mode, point);
+  return new PannerNode(ctx, {
+    panningModel: "HRTF",
+    distanceModel: "inverse",
+    positionX: mapped.x,
+    positionY: mapped.y,
+    positionZ: mapped.z,
+    refDistance: 1,
+    maxDistance: 12,
+    rolloffFactor: 0
+  });
 }
 
 export default function App() {
@@ -225,62 +256,34 @@ export default function App() {
     }
 
     const start = ctx.currentTime + 0.03;
-    const notes = [261.63, 329.63, 392.0, 523.25, 659.25];
-    const noteDuration = 0.27;
-    const normalizedDepth = normalizeDepth(spatialMode, trial.target.z);
-    const harmonicTilt = 1 + trial.target.y * 0.08;
-    const toneCutoff = 2200 + ((normalizedDepth + 1) * 0.5) * 5600;
-    const masterGainValue = 0.18 + ((normalizedDepth + 1) * 0.5) * 0.18;
-
-    const panner3d = new PannerNode(ctx, {
-      panningModel: "HRTF",
-      distanceModel: "inverse",
-      positionX: trial.target.x * 1.7,
-      positionY: trial.target.y * 1.3,
-      positionZ: -normalizedDepth * 1.8,
-      refDistance: 1,
-      maxDistance: 12,
-      rolloffFactor: 1.2
-    });
-
+    const cueDuration = 1.3;
+    const panner3d = createSpatialPanner(ctx, spatialMode, trial.target);
     const timbre = ctx.createBiquadFilter();
     timbre.type = "lowpass";
-    timbre.frequency.value = toneCutoff;
-    timbre.Q.value = 0.6;
+    timbre.frequency.value = 5200;
+    timbre.Q.value = 0.9;
+
+    const envelope = ctx.createGain();
+    envelope.gain.setValueAtTime(0.0001, start);
+    envelope.gain.exponentialRampToValueAtTime(1, start + 0.04);
+    envelope.gain.setValueAtTime(1, start + cueDuration - 0.08);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, start + cueDuration);
 
     const master = ctx.createGain();
-    master.gain.value = masterGainValue;
+    master.gain.value = planarLoudness(trial.target);
 
-    timbre.connect(master);
+    const oscillator = ctx.createOscillator();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(SPATIAL_REFERENCE_FREQ_HZ, start);
+
+    oscillator.connect(timbre);
+    timbre.connect(envelope);
+    envelope.connect(master);
     master.connect(panner3d);
     panner3d.connect(ctx.destination);
 
-    notes.forEach((baseFreq, idx) => {
-      const t = start + idx * 0.2;
-      const freq = baseFreq * harmonicTilt;
-
-      const oscA = ctx.createOscillator();
-      oscA.type = "triangle";
-      oscA.frequency.setValueAtTime(freq, t);
-
-      const oscB = ctx.createOscillator();
-      oscB.type = "sine";
-      oscB.frequency.setValueAtTime(freq * 2, t);
-
-      const envelope = ctx.createGain();
-      envelope.gain.setValueAtTime(0.0001, t);
-      envelope.gain.exponentialRampToValueAtTime(0.26, t + 0.03);
-      envelope.gain.exponentialRampToValueAtTime(0.0001, t + noteDuration);
-
-      oscA.connect(envelope);
-      oscB.connect(envelope);
-      envelope.connect(timbre);
-
-      oscA.start(t);
-      oscB.start(t);
-      oscA.stop(t + noteDuration + 0.03);
-      oscB.stop(t + noteDuration + 0.03);
-    });
+    oscillator.start(start);
+    oscillator.stop(start + cueDuration + 0.03);
 
     setStatus(`已播放第 ${trial.id} 题提示音，请在空间中点击你感知的位置`);
   }
@@ -301,26 +304,17 @@ export default function App() {
 
     const oscillator = ctx.createOscillator();
     oscillator.type = "sine";
-    oscillator.frequency.value = 320;
+    oscillator.frequency.value = SPATIAL_REFERENCE_FREQ_HZ;
 
     const timbre = ctx.createBiquadFilter();
     timbre.type = "lowpass";
-    timbre.frequency.value = 6200;
+    timbre.frequency.value = 5200;
     timbre.Q.value = 0.9;
 
     const gain = ctx.createGain();
-    gain.gain.value = 0.16;
+    gain.gain.value = planarLoudness(baselineSweepPoint(0, spatialMode));
 
-    const panner3d = new PannerNode(ctx, {
-      panningModel: "HRTF",
-      distanceModel: "inverse",
-      positionX: 0,
-      positionY: 0,
-      positionZ: 0,
-      refDistance: 1,
-      maxDistance: 12,
-      rolloffFactor: 1.05
-    });
+    const panner3d = createSpatialPanner(ctx, spatialMode, baselineSweepPoint(0, spatialMode));
 
     oscillator.connect(timbre);
     timbre.connect(gain);
@@ -347,15 +341,14 @@ export default function App() {
     const tick = (now: number) => {
       const progress = Math.min((now - startedAt) / durationMs, 1);
       const point = baselineSweepPoint(progress, spatialMode);
-      const normalizedDepth = normalizeDepth(spatialMode, point.z);
       setBaselinePoint(point);
 
       const t = ctx.currentTime;
-      oscillator.frequency.setValueAtTime(250 + progress * 280 + Math.sin(progress * Math.PI * 6) * 16, t);
-      timbre.frequency.setValueAtTime(3200 + (1 - Math.abs(point.y)) * 2200, t);
-      panner3d.positionX.setValueAtTime(point.x * 1.7, t);
-      panner3d.positionY.setValueAtTime(point.y * 1.3, t);
-      panner3d.positionZ.setValueAtTime(-normalizedDepth * 1.8, t);
+      const mapped = spatialPannerPosition(spatialMode, point);
+      gain.gain.setValueAtTime(planarLoudness(point), t);
+      panner3d.positionX.setValueAtTime(mapped.x, t);
+      panner3d.positionY.setValueAtTime(mapped.y, t);
+      panner3d.positionZ.setValueAtTime(mapped.z, t);
 
       if (progress < 1) {
         baselineAnimationFrameRef.current = requestAnimationFrame(tick);
