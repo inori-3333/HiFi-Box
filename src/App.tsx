@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -82,6 +82,22 @@ function planePointToPercent(point: SpatialPoint, plane: SpatialPlane): { left: 
   return { left: `${((point.z + 1) / 2) * 100}%`, top: `${(1 - (point.y + 1) / 2) * 100}%` };
 }
 
+function normalizeDepth(mode: SpatialMode, z: number): number {
+  return mode === "2d" ? z * 2 - 1 : z;
+}
+
+function baselineSweepPoint(progress: number, mode: SpatialMode): SpatialPoint {
+  const rows = 7;
+  const rowFloat = Math.min(progress * rows, rows - 1e-6);
+  const rowIndex = Math.floor(rowFloat);
+  const rowT = rowFloat - rowIndex;
+  const leftToRight = rowIndex % 2 === 0;
+  const x = leftToRight ? rowT * 2 - 1 : 1 - rowT * 2;
+  const y = 1 - (rowIndex / (rows - 1)) * 2;
+  const z = mode === "2d" ? 0.5 : 0;
+  return { x, y, z };
+}
+
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -98,7 +114,12 @@ export default function App() {
   const [spatialIndex, setSpatialIndex] = useState(0);
   const [spatialGuess, setSpatialGuess] = useState<SpatialPoint | null>(null);
   const [spatialMode, setSpatialMode] = useState<SpatialMode>("3d");
+  const [baselinePoint, setBaselinePoint] = useState<SpatialPoint | null>(null);
+  const [baselineRunning, setBaselineRunning] = useState(false);
+  const [baselineTrialId, setBaselineTrialId] = useState<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const baselineAnimationFrameRef = useRef<number | null>(null);
+  const baselineStopRef = useRef<(() => void) | null>(null);
   const [sweepAcq, setSweepAcq] = useState<SweepAcquisitionConfig>({
     tone_duration_ms: 180,
     tone_amplitude: 0.22,
@@ -132,6 +153,19 @@ export default function App() {
     ];
   }, [score]);
 
+  function stopBaselineSweep() {
+    if (baselineAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(baselineAnimationFrameRef.current);
+      baselineAnimationFrameRef.current = null;
+    }
+    if (baselineStopRef.current) {
+      baselineStopRef.current();
+      baselineStopRef.current = null;
+    }
+    setBaselineRunning(false);
+    setBaselinePoint(null);
+  }
+
   async function prepareDevices() {
     setBusy(true);
     setStatus("正在枚举音频设备...");
@@ -163,6 +197,8 @@ export default function App() {
     setSpatialIndex(0);
     setSpatialMode(mode);
     setSpatialGuess(mode === "2d" ? { x: 0, y: 0, z: 0.5 } : { x: 0, y: 0, z: 0 });
+    setBaselinePoint(null);
+    setBaselineTrialId(null);
     setStage("spatial");
     setStatus(
       mode === "2d"
@@ -191,7 +227,7 @@ export default function App() {
     const start = ctx.currentTime + 0.03;
     const notes = [261.63, 329.63, 392.0, 523.25, 659.25];
     const noteDuration = 0.27;
-    const normalizedDepth = spatialMode === "2d" ? trial.target.z * 2 - 1 : trial.target.z;
+    const normalizedDepth = normalizeDepth(spatialMode, trial.target.z);
     const harmonicTilt = 1 + trial.target.y * 0.08;
     const toneCutoff = 2200 + ((normalizedDepth + 1) * 0.5) * 5600;
     const masterGainValue = 0.18 + ((normalizedDepth + 1) * 0.5) * 0.18;
@@ -249,6 +285,89 @@ export default function App() {
     setStatus(`已播放第 ${trial.id} 题提示音，请在空间中点击你感知的位置`);
   }
 
+  async function playBaselineSweep() {
+    if (spatialTrials.length === 0) {
+      return;
+    }
+    stopBaselineSweep();
+    const trialId = spatialTrials[spatialIndex].id;
+    setBaselineTrialId(trialId);
+    setBaselineRunning(true);
+
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+
+    const oscillator = ctx.createOscillator();
+    oscillator.type = "sine";
+    oscillator.frequency.value = 320;
+
+    const timbre = ctx.createBiquadFilter();
+    timbre.type = "lowpass";
+    timbre.frequency.value = 6200;
+    timbre.Q.value = 0.9;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0.16;
+
+    const panner3d = new PannerNode(ctx, {
+      panningModel: "HRTF",
+      distanceModel: "inverse",
+      positionX: 0,
+      positionY: 0,
+      positionZ: 0,
+      refDistance: 1,
+      maxDistance: 12,
+      rolloffFactor: 1.05
+    });
+
+    oscillator.connect(timbre);
+    timbre.connect(gain);
+    gain.connect(panner3d);
+    panner3d.connect(ctx.destination);
+    oscillator.start();
+
+    baselineStopRef.current = () => {
+      try {
+        oscillator.stop();
+      } catch {
+        // noop: oscillator already stopped
+      }
+      oscillator.disconnect();
+      timbre.disconnect();
+      gain.disconnect();
+      panner3d.disconnect();
+    };
+
+    const durationMs = 5400;
+    const startedAt = performance.now();
+    setStatus(`正在播放第 ${trialId} 题基准音：平滑扫过参考平面...`);
+
+    const tick = (now: number) => {
+      const progress = Math.min((now - startedAt) / durationMs, 1);
+      const point = baselineSweepPoint(progress, spatialMode);
+      const normalizedDepth = normalizeDepth(spatialMode, point.z);
+      setBaselinePoint(point);
+
+      const t = ctx.currentTime;
+      oscillator.frequency.setValueAtTime(250 + progress * 280 + Math.sin(progress * Math.PI * 6) * 16, t);
+      timbre.frequency.setValueAtTime(3200 + (1 - Math.abs(point.y)) * 2200, t);
+      panner3d.positionX.setValueAtTime(point.x * 1.7, t);
+      panner3d.positionY.setValueAtTime(point.y * 1.3, t);
+      panner3d.positionZ.setValueAtTime(-normalizedDepth * 1.8, t);
+
+      if (progress < 1) {
+        baselineAnimationFrameRef.current = requestAnimationFrame(tick);
+      } else {
+        stopBaselineSweep();
+        setStatus(`第 ${trialId} 题基准音播放完成，请开始选择位置`);
+      }
+    };
+
+    baselineAnimationFrameRef.current = requestAnimationFrame(tick);
+  }
+
   function handleSpatialPlaneClick(event: React.MouseEvent<HTMLDivElement>, plane: SpatialPlane) {
     const rect = event.currentTarget.getBoundingClientRect();
     const px = (event.clientX - rect.left) / rect.width;
@@ -303,12 +422,35 @@ export default function App() {
     }
     setSpatialIndex((v) => v + 1);
     setSpatialGuess(spatialMode === "2d" ? { x: 0, y: 0, z: 0.5 } : { x: 0, y: 0, z: 0 });
+    setBaselinePoint(null);
+    setBaselineTrialId(null);
     setStatus(
       spatialMode === "2d"
         ? `进入第 ${spatialIndex + 2} 题，请播放提示音并在 2D 区域定位`
         : `进入第 ${spatialIndex + 2} 题，请播放提示音并在三视图中定位`
     );
   }
+
+  useEffect(() => {
+    if (stage !== "spatial" || spatialTrials.length === 0) {
+      return;
+    }
+    const currentTrialId = spatialTrials[spatialIndex].id;
+    if (baselineTrialId === currentTrialId) {
+      return;
+    }
+    void playBaselineSweep();
+  }, [baselineTrialId, spatialIndex, spatialMode, spatialTrials, stage]);
+
+  useEffect(() => {
+    if (stage !== "spatial") {
+      stopBaselineSweep();
+      setBaselinePoint(null);
+    }
+    return () => {
+      stopBaselineSweep();
+    };
+  }, [stage]);
 
   async function refreshHistory() {
     setBusy(true);
@@ -519,6 +661,9 @@ export default function App() {
         <section className="grid">
           <div className="card">
             <h2>空间结像测试（{spatialMode.toUpperCase()}）</h2>
+            <div className="row">
+              <button onClick={() => setStage("home")}>返回首页</button>
+            </div>
             <p>
               第 {spatialIndex + 1}/{spatialTrials.length} 题。先播放提示音，
               {spatialMode === "2d"
@@ -527,13 +672,13 @@ export default function App() {
               提交后揭晓标准答案。
             </p>
             <div className="row">
-              <button disabled={busy} onClick={playSpatialCue}>
+              <button disabled={busy || baselineRunning} onClick={playBaselineSweep}>
+                {baselineRunning ? "基准音播放中..." : "播放基准音"}
+              </button>
+              <button disabled={busy || baselineRunning} onClick={playSpatialCue}>
                 播放提示音
               </button>
-              <button disabled={busy || !spatialGuess} onClick={submitSpatialGuess}>
-                提交并揭晓
-              </button>
-              <button disabled={busy} onClick={gotoNextSpatialTrial}>
+              <button disabled={busy || baselineRunning} onClick={gotoNextSpatialTrial}>
                 下一题
               </button>
             </div>
@@ -597,6 +742,9 @@ export default function App() {
                   <div className="cartesian-plane" onClick={(e) => handleSpatialPlaneClick(e, "xy")}>
                     <div className="plane-axis-x" />
                     <div className="plane-axis-y" />
+                    {baselinePoint && (
+                      <div className="spatial-dot spatial-baseline" style={planePointToPercent(baselinePoint, "xy")} />
+                    )}
                     {spatialGuess && <div className="spatial-dot spatial-user" style={planePointToPercent(spatialGuess, "xy")} />}
                     {spatialTrials[spatialIndex].revealed && (
                       <div
@@ -611,6 +759,9 @@ export default function App() {
                   <div className="cartesian-plane" onClick={(e) => handleSpatialPlaneClick(e, "xz")}>
                     <div className="plane-axis-x" />
                     <div className="plane-axis-y" />
+                    {baselinePoint && (
+                      <div className="spatial-dot spatial-baseline" style={planePointToPercent(baselinePoint, "xz")} />
+                    )}
                     {spatialGuess && <div className="spatial-dot spatial-user" style={planePointToPercent(spatialGuess, "xz")} />}
                     {spatialTrials[spatialIndex].revealed && (
                       <div
@@ -625,6 +776,9 @@ export default function App() {
                   <div className="cartesian-plane" onClick={(e) => handleSpatialPlaneClick(e, "zy")}>
                     <div className="plane-axis-x" />
                     <div className="plane-axis-y" />
+                    {baselinePoint && (
+                      <div className="spatial-dot spatial-baseline" style={planePointToPercent(baselinePoint, "zy")} />
+                    )}
                     {spatialGuess && <div className="spatial-dot spatial-user" style={planePointToPercent(spatialGuess, "zy")} />}
                     {spatialTrials[spatialIndex].revealed && (
                       <div
@@ -635,14 +789,28 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <p className="hint">蓝点=你的选择，红点=标准答案。点击任意视图即可更新对应坐标轴。</p>
+              <p className="hint">黄点=基准音位置，蓝点=你的选择，红点=标准答案。</p>
               {spatialTrials[spatialIndex].revealed && <p>本题得分: {spatialTrials[spatialIndex].score?.toFixed(1)}</p>}
+              <div className="submit-row">
+                <button disabled={busy || !spatialGuess || baselineRunning} onClick={submitSpatialGuess}>
+                  提交并揭晓
+                </button>
+              </div>
             </div>
           ) : (
             <div className="card">
               <h2>2D 空间区域（旧版）</h2>
               <div className="spatial-arena2d" onClick={handleSpatialArena2DClick}>
                 <div className="spatial-self-2d" />
+                {baselinePoint && (
+                  <div
+                    className="spatial-dot spatial-baseline"
+                    style={{
+                      left: `${((baselinePoint.x + 1) / 2) * 100}%`,
+                      top: `${(1 - (baselinePoint.y + 1) / 2) * 100}%`
+                    }}
+                  />
+                )}
                 {spatialGuess && (
                   <div
                     className="spatial-dot spatial-user"
@@ -662,8 +830,13 @@ export default function App() {
                   />
                 )}
               </div>
-              <p className="hint">蓝点=你的选择，红点=标准答案，中心点=你所在位置</p>
+              <p className="hint">黄点=基准音位置，蓝点=你的选择，红点=标准答案，中心点=你所在位置</p>
               {spatialTrials[spatialIndex].revealed && <p>本题得分: {spatialTrials[spatialIndex].score?.toFixed(1)}</p>}
+              <div className="submit-row">
+                <button disabled={busy || !spatialGuess || baselineRunning} onClick={submitSpatialGuess}>
+                  提交并揭晓
+                </button>
+              </div>
             </div>
           )}
 
@@ -688,6 +861,9 @@ export default function App() {
         <section className="grid">
           <div className="card">
             <h2>设备状态</h2>
+            <div className="row">
+              <button onClick={() => setStage("home")}>返回首页</button>
+            </div>
             <label>
               输入设备
               <select value={selectedInput} onChange={(e) => setSelectedInput(e.target.value)}>
@@ -803,6 +979,9 @@ export default function App() {
         <section className="grid">
           <div className="card">
             <h2>总分</h2>
+            <div className="row">
+              <button onClick={() => setStage("home")}>返回首页</button>
+            </div>
             <div className="score">{score.total_score.toFixed(1)}</div>
             <div className="subscores">
               <span>ABX {score.subscores.abx.toFixed(1)}</span>

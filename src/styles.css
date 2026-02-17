@@ -215,9 +215,21 @@ td {
   border: 1px solid rgba(255, 255, 255, 0.8);
 }
 
+.spatial-baseline {
+  background: #f0b33c;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 2px rgba(240, 179, 60, 0.22);
+}
+
 .spatial-target {
   background: #d44d43;
   border: 1px solid rgba(255, 255, 255, 0.8);
+}
+
+.submit-row {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .statusbar {
