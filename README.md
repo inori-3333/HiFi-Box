@@ -45,6 +45,20 @@ npm install
 npm run tauri dev
 ```
 
+## GitHub Pages 部署（空间结像模块）
+
+仓库已包含自动部署工作流：`.github/workflows/deploy-pages.yml`  
+推送到 `main` 分支后会自动构建并发布到 GitHub Pages。
+
+发布地址通常为：
+
+- `https://inori-3333.github.io/HiFi-Box/`
+
+说明：
+
+- GitHub Pages 版本用于空间结像测试（2D/3D）。
+- ABX/Sweep/THD/声道一致性等硬件采集功能需要 Tauri 桌面版运行。
+
 ## 数据目录
 
 运行后默认将数据写入项目目录下：

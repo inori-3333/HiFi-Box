@@ -23,6 +23,7 @@ import type {
 
 const SAMPLE_RATE = 48_000;
 const APP_VERSION = "0.1.0";
+const IS_TAURI_RUNTIME = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 type Stage = "home" | "wizard" | "result" | "spatial";
 
@@ -113,6 +114,7 @@ export default function App() {
     tone_amplitude: 0.22,
     inter_channel_pause_ms: 30
   });
+  const isWebDemo = !IS_TAURI_RUNTIME;
 
   const score = project?.score_result;
   const inputDevices = useMemo(() => devices.filter((d) => d.id.startsWith("input::")), [devices]);
@@ -467,39 +469,49 @@ export default function App() {
         <section className="grid">
           <div className="card">
             <h2>首页</h2>
-            <p>新建测试，自动完成设备校验、校准、执行测试与报告生成。</p>
+            <p>
+              {isWebDemo
+                ? "当前为 GitHub Pages 版本：可使用空间结像测试（2D/3D）。硬件采集类测试需在 Tauri 桌面版运行。"
+                : "新建测试，自动完成设备校验、校准、执行测试与报告生成。"}
+            </p>
             <div className="row">
-              <button disabled={busy} onClick={prepareDevices}>
-                新建测试
-              </button>
+              {!isWebDemo && (
+                <button disabled={busy} onClick={prepareDevices}>
+                  新建测试
+                </button>
+              )}
               <button disabled={busy} onClick={() => startSpatialTest("2d")}>
                 空间结像测试(2D)
               </button>
               <button disabled={busy} onClick={() => startSpatialTest("3d")}>
                 空间结像测试(3D)
               </button>
-              <button disabled={busy} onClick={refreshHistory}>
-                刷新历史
-              </button>
+              {!isWebDemo && (
+                <button disabled={busy} onClick={refreshHistory}>
+                  刷新历史
+                </button>
+              )}
             </div>
           </div>
-          <div className="card">
-            <h2>历史项目</h2>
-            {history.length === 0 && <p className="hint">暂无历史记录，先完成一次测试并保存。</p>}
-            {history.map((item) => (
-              <div key={item.project_id} className="history-item">
-                <div>
-                  <strong>{item.project_id}</strong>
-                  <p className="hint">
-                    score {item.total_score.toFixed(1)} | {item.sample_rate} Hz
-                  </p>
+          {!isWebDemo && (
+            <div className="card">
+              <h2>历史项目</h2>
+              {history.length === 0 && <p className="hint">暂无历史记录，先完成一次测试并保存。</p>}
+              {history.map((item) => (
+                <div key={item.project_id} className="history-item">
+                  <div>
+                    <strong>{item.project_id}</strong>
+                    <p className="hint">
+                      score {item.total_score.toFixed(1)} | {item.sample_rate} Hz
+                    </p>
+                  </div>
+                  <button disabled={busy} onClick={() => openHistoryProject(item.project_id)}>
+                    打开
+                  </button>
                 </div>
-                <button disabled={busy} onClick={() => openHistoryProject(item.project_id)}>
-                  打开
-                </button>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
