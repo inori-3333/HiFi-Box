@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   PolarAngleAxis,
   PolarGrid,
@@ -11,18 +11,45 @@ import {
 import { api } from "./api";
 import type {
   CalibrationSession,
+  ChannelAcquisitionConfig,
   DeviceInfo,
   ExportResult,
   ProjectSummary,
   SaveResult,
   ScoreResult,
+  SweepAcquisitionConfig,
   TestProject
 } from "./types";
 
 const SAMPLE_RATE = 48_000;
 const APP_VERSION = "0.1.0";
 
-type Stage = "home" | "wizard" | "result";
+type Stage = "home" | "wizard" | "result" | "spatial";
+
+type SpatialPoint = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+type SpatialTrial = {
+  id: number;
+  target: SpatialPoint;
+  user?: SpatialPoint;
+  score?: number;
+  revealed: boolean;
+};
+
+const SPATIAL_TARGETS: SpatialPoint[] = [
+  { x: -0.85, y: -0.45, z: 0.2 },
+  { x: -0.65, y: 0.2, z: 0.55 },
+  { x: -0.4, y: -0.75, z: 0.35 },
+  { x: -0.1, y: 0.7, z: 0.8 },
+  { x: 0.2, y: -0.5, z: 0.65 },
+  { x: 0.45, y: 0.35, z: 0.45 },
+  { x: 0.75, y: -0.2, z: 0.25 },
+  { x: 0.9, y: 0.55, z: 0.7 }
+];
 
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
@@ -36,8 +63,29 @@ export default function App() {
   const [history, setHistory] = useState<ProjectSummary[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("准备开始测试");
+  const [spatialTrials, setSpatialTrials] = useState<SpatialTrial[]>([]);
+  const [spatialIndex, setSpatialIndex] = useState(0);
+  const [spatialGuess, setSpatialGuess] = useState<SpatialPoint | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const [sweepAcq, setSweepAcq] = useState<SweepAcquisitionConfig>({
+    tone_duration_ms: 180,
+    tone_amplitude: 0.22,
+    inter_tone_pause_ms: 20
+  });
+  const [thdAcq, setThdAcq] = useState({
+    tone_duration_ms: 260,
+    tone_amplitude: 0.24,
+    inter_tone_pause_ms: 20
+  });
+  const [channelAcq, setChannelAcq] = useState<ChannelAcquisitionConfig>({
+    tone_duration_ms: 220,
+    tone_amplitude: 0.22,
+    inter_channel_pause_ms: 30
+  });
 
   const score = project?.score_result;
+  const inputDevices = useMemo(() => devices.filter((d) => d.id.startsWith("input::")), [devices]);
+  const outputDevices = useMemo(() => devices.filter((d) => d.id.startsWith("output::")), [devices]);
 
   const radarData = useMemo(() => {
     if (!score) {
@@ -57,10 +105,10 @@ export default function App() {
     try {
       const list = await api.listAudioDevices();
       setDevices(list);
-      if (list.length > 0) {
-        setSelectedInput(list[0].id);
-        setSelectedOutput(list[Math.min(1, list.length - 1)].id);
-      }
+      const firstInput = list.find((d) => d.id.startsWith("input::"));
+      const firstOutput = list.find((d) => d.id.startsWith("output::"));
+      setSelectedInput(firstInput?.id ?? "");
+      setSelectedOutput(firstOutput?.id ?? "");
       setStage("wizard");
       setStatus("设备就绪，请执行校准");
     } catch (error) {
@@ -68,6 +116,106 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function startSpatialTest() {
+    const shuffled = [...SPATIAL_TARGETS].sort(() => Math.random() - 0.5).slice(0, 6);
+    const trials = shuffled.map((target, idx) => ({
+      id: idx + 1,
+      target,
+      revealed: false
+    }));
+    setSpatialTrials(trials);
+    setSpatialIndex(0);
+    setSpatialGuess(null);
+    setStage("spatial");
+    setStatus("空间测试已开始：播放提示音并选择你感知的声源位置");
+  }
+
+  function getAudioContext(): AudioContext {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    return audioContextRef.current;
+  }
+
+  async function playSpatialCue() {
+    if (spatialTrials.length === 0) {
+      return;
+    }
+    const trial = spatialTrials[spatialIndex];
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+
+    const durationSec = 1.2;
+    const frameCount = Math.floor(ctx.sampleRate * durationSec);
+    const buffer = ctx.createBuffer(1, frameCount, ctx.sampleRate);
+    const channelData = buffer.getChannelData(0);
+    for (let i = 0; i < frameCount; i += 1) {
+      channelData[i] = (Math.random() * 2 - 1) * 0.35;
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const lowPass = ctx.createBiquadFilter();
+    lowPass.type = "lowpass";
+    lowPass.frequency.value = 1800 + trial.target.z * 7200;
+
+    const gain = ctx.createGain();
+    gain.gain.value = 0.35 + trial.target.z * 0.4;
+
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = trial.target.x;
+
+    source.connect(lowPass);
+    lowPass.connect(gain);
+    gain.connect(panner);
+    panner.connect(ctx.destination);
+
+    source.start();
+    source.stop(ctx.currentTime + durationSec);
+    setStatus(`已播放第 ${trial.id} 题提示音，请在空间中点击你感知的位置`);
+  }
+
+  function handleSpatialArenaClick(event: React.MouseEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const px = (event.clientX - rect.left) / rect.width;
+    const py = (event.clientY - rect.top) / rect.height;
+    const x = Math.max(-1, Math.min(1, px * 2 - 1));
+    const y = Math.max(-1, Math.min(1, (1 - py) * 2 - 1));
+    setSpatialGuess((old) => ({ x, y, z: old?.z ?? 0.5 }));
+  }
+
+  function submitSpatialGuess() {
+    if (!spatialGuess) {
+      setStatus("请先点击空间区域并设置深度后再提交");
+      return;
+    }
+    const trial = spatialTrials[spatialIndex];
+    const dx = spatialGuess.x - trial.target.x;
+    const dy = spatialGuess.y - trial.target.y;
+    const dz = spatialGuess.z - trial.target.z;
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const scoreValue = Math.max(0, Math.min(100, 100 - (distance / 3) * 100));
+
+    const nextTrials = spatialTrials.map((item, idx) =>
+      idx === spatialIndex ? { ...item, user: spatialGuess, score: scoreValue, revealed: true } : item
+    );
+    setSpatialTrials(nextTrials);
+    setStatus(`第 ${trial.id} 题已揭晓，空间结像得分 ${scoreValue.toFixed(1)}`);
+  }
+
+  function gotoNextSpatialTrial() {
+    if (spatialIndex >= spatialTrials.length - 1) {
+      setStatus("空间测试已完成，可查看汇总分数");
+      return;
+    }
+    setSpatialIndex((v) => v + 1);
+    setSpatialGuess(null);
+    setStatus(`进入第 ${spatialIndex + 2} 题，请先播放提示音`);
   }
 
   async function refreshHistory() {
@@ -131,12 +279,17 @@ export default function App() {
         start_hz: 20,
         end_hz: 20_000,
         points: 24,
-        sample_rate: SAMPLE_RATE
+        sample_rate: SAMPLE_RATE,
+        acquisition: sweepAcq
       });
       setStatus("执行 THD... ");
-      const thd = await api.runThdTest({ frequencies_hz: [100, 250, 1000, 5000, 10000], level_db: -12 });
+      const thd = await api.runThdTest({
+        frequencies_hz: [100, 250, 1000, 5000, 10000],
+        level_db: -12,
+        acquisition: thdAcq
+      });
       setStatus("执行 Channel Match... ");
-      const channel = await api.runChannelMatchTest({ left_gain_db: 0, right_gain_db: 0 });
+      const channel = await api.runChannelMatchTest({ left_gain_db: 0, right_gain_db: 0, acquisition: channelAcq });
       setStatus("计算评分... ");
       const scoreResult: ScoreResult = await api.computeScore({
         abx_result: abx,
@@ -229,6 +382,9 @@ export default function App() {
               <button disabled={busy} onClick={prepareDevices}>
                 新建测试
               </button>
+              <button disabled={busy} onClick={startSpatialTest}>
+                空间结像测试
+              </button>
               <button disabled={busy} onClick={refreshHistory}>
                 刷新历史
               </button>
@@ -254,6 +410,89 @@ export default function App() {
         </section>
       )}
 
+      {stage === "spatial" && spatialTrials.length > 0 && (
+        <section className="grid">
+          <div className="card">
+            <h2>空间结像测试</h2>
+            <p>
+              第 {spatialIndex + 1}/{spatialTrials.length} 题。先播放提示音，再点击你听到的声源位置，提交后会揭晓标准答案。
+            </p>
+            <div className="row">
+              <button disabled={busy} onClick={playSpatialCue}>
+                播放提示音
+              </button>
+              <button disabled={busy || !spatialGuess} onClick={submitSpatialGuess}>
+                提交并揭晓
+              </button>
+              <button disabled={busy} onClick={gotoNextSpatialTrial}>
+                下一题
+              </button>
+            </div>
+            <label>
+              前后深度 (0=近, 1=远)
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={spatialGuess?.z ?? 0.5}
+                onChange={(e) =>
+                  setSpatialGuess((old) => ({
+                    x: old?.x ?? 0,
+                    y: old?.y ?? 0,
+                    z: Number.parseFloat(e.target.value)
+                  }))
+                }
+              />
+            </label>
+          </div>
+
+          <div className="card">
+            <h2>3D 空间区域</h2>
+            <div className="spatial-arena" onClick={handleSpatialArenaClick}>
+              <div className="spatial-self" />
+              {spatialGuess && (
+                <div
+                  className="spatial-dot spatial-user"
+                  style={{
+                    left: `${((spatialGuess.x + 1) / 2) * 100}%`,
+                    top: `${(1 - (spatialGuess.y + 1) / 2) * 100}%`
+                  }}
+                />
+              )}
+              {spatialTrials[spatialIndex].revealed && (
+                <div
+                  className="spatial-dot spatial-target"
+                  style={{
+                    left: `${((spatialTrials[spatialIndex].target.x + 1) / 2) * 100}%`,
+                    top: `${(1 - (spatialTrials[spatialIndex].target.y + 1) / 2) * 100}%`
+                  }}
+                />
+              )}
+            </div>
+            <p className="hint">蓝点=你的选择，红点=标准答案，中心小点=你所在位置</p>
+            {spatialTrials[spatialIndex].revealed && (
+              <p>本题得分: {spatialTrials[spatialIndex].score?.toFixed(1)}</p>
+            )}
+          </div>
+
+          <div className="card">
+            <h2>测试汇总</h2>
+            <p>
+              已完成 {spatialTrials.filter((t) => t.revealed).length}/{spatialTrials.length}
+            </p>
+            <p>
+              平均分:{" "}
+              {(
+                spatialTrials.filter((t) => t.score !== undefined).reduce((acc, t) => acc + (t.score ?? 0), 0) /
+                Math.max(1, spatialTrials.filter((t) => t.score !== undefined).length)
+              ).toFixed(1)}
+            </p>
+            <button onClick={() => setStage("home")}>返回首页</button>
+          </div>
+        </section>
+      )}
+
       {stage === "wizard" && (
         <section className="grid">
           <div className="card">
@@ -261,7 +500,7 @@ export default function App() {
             <label>
               输入设备
               <select value={selectedInput} onChange={(e) => setSelectedInput(e.target.value)}>
-                {devices.map((d) => (
+                {inputDevices.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
                   </option>
@@ -271,7 +510,7 @@ export default function App() {
             <label>
               输出设备
               <select value={selectedOutput} onChange={(e) => setSelectedOutput(e.target.value)}>
-                {devices.map((d) => (
+                {outputDevices.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
                   </option>
@@ -293,6 +532,78 @@ export default function App() {
                 <p>status: {calibration.status}</p>
               </div>
             )}
+            <h3>采集参数</h3>
+            <label>
+              Sweep 时长(ms)
+              <input
+                type="number"
+                min={80}
+                max={2000}
+                value={sweepAcq.tone_duration_ms}
+                onChange={(e) =>
+                  setSweepAcq((v) => ({ ...v, tone_duration_ms: Number.parseInt(e.target.value || "0", 10) }))
+                }
+              />
+            </label>
+            <label>
+              Sweep 幅度(0-1)
+              <input
+                type="number"
+                min={0.02}
+                max={0.85}
+                step={0.01}
+                value={sweepAcq.tone_amplitude}
+                onChange={(e) => setSweepAcq((v) => ({ ...v, tone_amplitude: Number.parseFloat(e.target.value) }))}
+              />
+            </label>
+            <label>
+              THD 时长(ms)
+              <input
+                type="number"
+                min={100}
+                max={2000}
+                value={thdAcq.tone_duration_ms}
+                onChange={(e) =>
+                  setThdAcq((v) => ({ ...v, tone_duration_ms: Number.parseInt(e.target.value || "0", 10) }))
+                }
+              />
+            </label>
+            <label>
+              THD 幅度(0-1)
+              <input
+                type="number"
+                min={0.02}
+                max={0.85}
+                step={0.01}
+                value={thdAcq.tone_amplitude}
+                onChange={(e) => setThdAcq((v) => ({ ...v, tone_amplitude: Number.parseFloat(e.target.value) }))}
+              />
+            </label>
+            <label>
+              声道测试时长(ms)
+              <input
+                type="number"
+                min={100}
+                max={2000}
+                value={channelAcq.tone_duration_ms}
+                onChange={(e) =>
+                  setChannelAcq((v) => ({ ...v, tone_duration_ms: Number.parseInt(e.target.value || "0", 10) }))
+                }
+              />
+            </label>
+            <label>
+              声道测试幅度(0-1)
+              <input
+                type="number"
+                min={0.02}
+                max={0.85}
+                step={0.01}
+                value={channelAcq.tone_amplitude}
+                onChange={(e) =>
+                  setChannelAcq((v) => ({ ...v, tone_amplitude: Number.parseFloat(e.target.value) }))
+                }
+              />
+            </label>
           </div>
         </section>
       )}

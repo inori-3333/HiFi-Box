@@ -7,6 +7,7 @@ use core::commands::{
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(core::audio::AppState::default())
         .invoke_handler(tauri::generate_handler![
             list_audio_devices,
             start_calibration,

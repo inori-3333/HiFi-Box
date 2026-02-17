@@ -17,6 +17,12 @@ export type FrPoint = {
   deviation_db: number;
 };
 
+export type SweepAcquisitionConfig = {
+  tone_duration_ms: number;
+  tone_amplitude: number;
+  inter_tone_pause_ms: number;
+};
+
 export type SweepResult = {
   fr_points: FrPoint[];
   deviation_to_target: number;
@@ -28,6 +34,12 @@ export type SweepResult = {
 export type ThdBandPoint = {
   frequency_hz: number;
   thd_percent: number;
+};
+
+export type ThdAcquisitionConfig = {
+  tone_duration_ms: number;
+  tone_amplitude: number;
+  inter_tone_pause_ms: number;
 };
 
 export type ThdResult = {
@@ -42,6 +54,12 @@ export type ChannelMatchResult = {
   phase_correlation: number;
   match_score: number;
   low_confidence: boolean;
+};
+
+export type ChannelAcquisitionConfig = {
+  tone_duration_ms: number;
+  tone_amplitude: number;
+  inter_channel_pause_ms: number;
 };
 
 export type AbxResult = {

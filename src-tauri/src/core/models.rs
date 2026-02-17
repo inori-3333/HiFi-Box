@@ -28,18 +28,45 @@ pub struct SweepConfig {
     pub end_hz: f32,
     pub points: usize,
     pub sample_rate: u32,
+    #[serde(default)]
+    pub acquisition: Option<SweepAcquisitionConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThdConfig {
     pub frequencies_hz: Vec<f32>,
     pub level_db: f32,
+    #[serde(default)]
+    pub acquisition: Option<ThdAcquisitionConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelMatchConfig {
     pub left_gain_db: f32,
     pub right_gain_db: f32,
+    #[serde(default)]
+    pub acquisition: Option<ChannelAcquisitionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SweepAcquisitionConfig {
+    pub tone_duration_ms: u64,
+    pub tone_amplitude: f32,
+    pub inter_tone_pause_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThdAcquisitionConfig {
+    pub tone_duration_ms: u64,
+    pub tone_amplitude: f32,
+    pub inter_tone_pause_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelAcquisitionConfig {
+    pub tone_duration_ms: u64,
+    pub tone_amplitude: f32,
+    pub inter_channel_pause_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

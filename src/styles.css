@@ -81,6 +81,15 @@ select {
   background: #fff;
 }
 
+input {
+  margin-top: 6px;
+  width: 100%;
+  border: 1px solid #aac3a3;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
 .score {
   font-size: 50px;
   font-weight: 700;
@@ -118,6 +127,45 @@ td {
   gap: 8px;
   padding: 10px 0;
   border-bottom: 1px solid #d5e6d1;
+}
+
+.spatial-arena {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  aspect-ratio: 1 / 1;
+  border-radius: 14px;
+  border: 1px solid #aac3a3;
+  background: radial-gradient(circle at 50% 45%, #f4fff1 0%, #d8ead0 70%, #c4ddbc 100%);
+  overflow: hidden;
+  cursor: crosshair;
+}
+
+.spatial-self {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1b1b1b;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.spatial-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.spatial-user {
+  background: #3280d6;
+}
+
+.spatial-target {
+  background: #d44d43;
 }
 
 .statusbar {

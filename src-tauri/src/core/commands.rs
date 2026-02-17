@@ -5,6 +5,7 @@ use super::models::{
     ThdConfig, ThdResult,
 };
 use super::{scoring, storage, testsuite};
+use tauri::State;
 
 #[tauri::command]
 pub fn list_audio_devices() -> Vec<DeviceInfo> {
@@ -13,6 +14,7 @@ pub fn list_audio_devices() -> Vec<DeviceInfo> {
 
 #[tauri::command]
 pub fn start_calibration(
+    state: State<'_, audio::AppState>,
     input_device_id: String,
     output_device_id: String,
     sample_rate: u32,
@@ -23,7 +25,13 @@ pub fn start_calibration(
     if sample_rate < 44_100 {
         return Err("sample_rate must be >= 44100".to_string());
     }
-    Ok(audio::calibrate(sample_rate))
+    let session = audio::MeasurementSession {
+        input_device_id,
+        output_device_id,
+        sample_rate,
+    };
+    audio::set_session(&state, session.clone())?;
+    audio::calibrate_session(&session)
 }
 
 #[tauri::command]
@@ -32,18 +40,24 @@ pub fn run_abx_test(config: AbxConfig) -> AbxResult {
 }
 
 #[tauri::command]
-pub fn run_sweep_test(config: SweepConfig) -> SweepResult {
-    testsuite::run_sweep(config)
+pub fn run_sweep_test(state: State<'_, audio::AppState>, config: SweepConfig) -> Result<SweepResult, String> {
+    let session = audio::get_session(&state)?;
+    testsuite::run_sweep(config, Some(&session))
 }
 
 #[tauri::command]
-pub fn run_thd_test(config: ThdConfig) -> ThdResult {
-    testsuite::run_thd(config)
+pub fn run_thd_test(state: State<'_, audio::AppState>, config: ThdConfig) -> Result<ThdResult, String> {
+    let session = audio::get_session(&state)?;
+    testsuite::run_thd(config, Some(&session))
 }
 
 #[tauri::command]
-pub fn run_channel_match_test(config: ChannelMatchConfig) -> ChannelMatchResult {
-    testsuite::run_channel_match(config)
+pub fn run_channel_match_test(
+    state: State<'_, audio::AppState>,
+    config: ChannelMatchConfig,
+) -> Result<ChannelMatchResult, String> {
+    let session = audio::get_session(&state)?;
+    testsuite::run_channel_match(config, Some(&session))
 }
 
 #[tauri::command]

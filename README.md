@@ -51,3 +51,17 @@ npm run tauri dev
 
 - `data/<test_id>/project.json`
 - `data/exports/report_<test_id>_<timestamp>.html|json`
+
+## 常用命令
+1.
+```bash
+$env:Path += ";$env:USERPROFILE\.cargo\bin"
+```
+2.
+```
+npm run dev
+```
+3.
+```
+npm run tauri dev
+```
