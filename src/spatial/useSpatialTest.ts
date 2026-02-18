@@ -190,6 +190,8 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     if (ctx.state === "suspended") {
       try {
         await ctx.resume();
+        // 首次 resume 后等待音频硬件初始化，避免首段音频丢失
+        await new Promise(resolve => setTimeout(resolve, 100));
       } catch (e) {
         setStatus("音频初始化失败，请点击页面任意位置后再试");
         return false;
