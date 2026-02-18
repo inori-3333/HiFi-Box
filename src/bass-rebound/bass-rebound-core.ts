@@ -4,7 +4,7 @@
  */
 
 const BPM_START = 80;
-const BPM_END = 260;
+const BPM_END = 360;
 const TEST_DURATION_SEC = 40;
 const LOOKAHEAD_SEC = 0.05;
 

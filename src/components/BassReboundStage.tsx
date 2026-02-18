@@ -67,7 +67,7 @@ export function BassReboundStage(props: BassReboundStageProps) {
       <div className="card bass-rebound-card">
         <h2>低频回弹测试</h2>
         <p>
-          测试耳机/音箱的低频瞬态响应能力。鼓点节奏会逐渐加快（80BPM → 260BPM），
+          测试耳机/音箱的低频瞬态响应能力。鼓点节奏会逐渐加快（80BPM → 360BPM），
           当您感觉低音开始"糊成一团"、无法分辨单个鼓点时，点击"标记极限"。
         </p>
 
