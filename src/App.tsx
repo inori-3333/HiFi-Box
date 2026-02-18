@@ -68,6 +68,12 @@ const SPATIAL_TARGETS_2D: SpatialPoint[] = [
 
 const MAX_CART_DISTANCE = Math.sqrt(12);
 const SPATIAL_REFERENCE_FREQ_HZ = 392;
+const SPATIAL_NOTE_INTERVALS = [0, 4, 7, 12, 7, 4];
+const SPATIAL_NOTE_DURATION_SEC = 0.11;
+const SPATIAL_MOTIF_ATTACK_SEC = 0.02;
+const SPATIAL_MOTIF_RELEASE_SEC = 0.08;
+const SPATIAL_SCHEDULE_LEAD_SEC = 0.03;
+const SPATIAL_BASELINE_POINT_GAP_SEC = 0.12;
 
 function clamp01ToSigned(value: number): number {
   return Math.max(-1, Math.min(1, value));
@@ -96,23 +102,28 @@ function spatialPannerPosition(mode: SpatialMode, point: SpatialPoint): { x: num
   };
 }
 
-function baselineSweepPoint(progress: number, mode: SpatialMode): SpatialPoint {
-  const rows = 7;
-  const rowFloat = Math.min(progress * rows, rows - 1e-6);
-  const rowIndex = Math.floor(rowFloat);
-  const rowT = rowFloat - rowIndex;
-  const leftToRight = rowIndex % 2 === 0;
-  const x = leftToRight ? rowT * 2 - 1 : 1 - rowT * 2;
-  const y = 1 - (rowIndex / (rows - 1)) * 2;
+function baselineReferencePoints(mode: SpatialMode): SpatialPoint[] {
   const z = mode === "2d" ? 0.5 : 0;
-  return { x, y, z };
+  return [
+    { x: 0, y: 0, z },
+    { x: 0.9, y: 0, z },
+    { x: -0.9, y: 0, z },
+    { x: 0, y: 0.9, z },
+    { x: 0, y: -0.9, z },
+    { x: 0.55, y: 0.55, z },
+    { x: -0.55, y: 0.55, z },
+    { x: -0.55, y: -0.55, z },
+    { x: 0.55, y: -0.55, z }
+  ];
 }
 
-function planarLoudness(point: SpatialPoint): number {
-  const radial = Math.min(1, Math.hypot(point.x, point.y));
-  const centerBoost = (1 - radial) * 0.09;
-  const verticalLift = ((point.y + 1) * 0.5) * 0.03;
-  return Math.max(0.12, Math.min(0.28, 0.14 + centerBoost + verticalLift));
+function planarLoudness(mode: SpatialMode, point: SpatialPoint): number {
+  const depth = normalizeDepth(mode, point.z);
+  const normalizedDistance = Math.min(1, Math.hypot(point.x, point.y, depth) / Math.sqrt(3));
+  const maxGain = 0.34;
+  const minGain = 0.08;
+  const falloff = Math.pow(normalizedDistance, 0.7);
+  return maxGain - (maxGain - minGain) * falloff;
 }
 
 function createSpatialPanner(ctx: AudioContext, mode: SpatialMode, point: SpatialPoint): PannerNode {
@@ -127,6 +138,155 @@ function createSpatialPanner(ctx: AudioContext, mode: SpatialMode, point: Spatia
     maxDistance: 12,
     rolloffFactor: 0
   });
+}
+
+function playSpatialMotifAtPoint(
+  ctx: AudioContext,
+  mode: SpatialMode,
+  point: SpatialPoint,
+  startAt: number
+): { endAt: number; stop: (at: number) => void } {
+  const body = ctx.createOscillator();
+  body.type = "triangle";
+  body.frequency.value = SPATIAL_REFERENCE_FREQ_HZ * Math.pow(2, SPATIAL_NOTE_INTERVALS[0] / 12);
+
+  const bodyGain = ctx.createGain();
+  bodyGain.gain.value = 0.78;
+
+  const harmonic = ctx.createOscillator();
+  harmonic.type = "sine";
+  harmonic.frequency.value = SPATIAL_REFERENCE_FREQ_HZ * 2 * Math.pow(2, SPATIAL_NOTE_INTERVALS[0] / 12);
+
+  const harmonicGain = ctx.createGain();
+  harmonicGain.gain.value = 0.22;
+
+  const mix = ctx.createGain();
+  const timbre = ctx.createBiquadFilter();
+  timbre.type = "lowpass";
+  timbre.frequency.value = 4600;
+  timbre.Q.value = 0.7;
+
+  body.connect(bodyGain);
+  bodyGain.connect(mix);
+  harmonic.connect(harmonicGain);
+  harmonicGain.connect(mix);
+  mix.connect(timbre);
+
+  const envelope = ctx.createGain();
+  const master = ctx.createGain();
+  const panner3d = createSpatialPanner(ctx, mode, point);
+
+  const motifDuration = SPATIAL_NOTE_INTERVALS.length * SPATIAL_NOTE_DURATION_SEC;
+  const sustainEnd = startAt + Math.max(SPATIAL_MOTIF_ATTACK_SEC, motifDuration - 0.015);
+  const endAt = startAt + motifDuration + SPATIAL_MOTIF_RELEASE_SEC;
+
+  envelope.gain.setValueAtTime(0.0001, startAt);
+  envelope.gain.exponentialRampToValueAtTime(1, startAt + SPATIAL_MOTIF_ATTACK_SEC);
+  envelope.gain.setValueAtTime(1, sustainEnd);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, endAt);
+
+  master.gain.setValueAtTime(planarLoudness(mode, point), startAt);
+
+  SPATIAL_NOTE_INTERVALS.forEach((semitone, idx) => {
+    const t = startAt + idx * SPATIAL_NOTE_DURATION_SEC;
+    const freq = SPATIAL_REFERENCE_FREQ_HZ * Math.pow(2, semitone / 12);
+    body.frequency.setValueAtTime(freq, t);
+    harmonic.frequency.setValueAtTime(freq * 2, t);
+  });
+
+  timbre.connect(envelope);
+  envelope.connect(master);
+  master.connect(panner3d);
+  panner3d.connect(ctx.destination);
+
+  body.start(startAt);
+  harmonic.start(startAt);
+  body.stop(endAt + 0.03);
+  harmonic.stop(endAt + 0.03);
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    try {
+      body.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      bodyGain.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      harmonic.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      harmonicGain.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      mix.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      timbre.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      envelope.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      master.disconnect();
+    } catch {
+      // noop
+    }
+    try {
+      panner3d.disconnect();
+    } catch {
+      // noop
+    }
+  };
+
+  const cleanupTimer = window.setTimeout(() => {
+    cleanup();
+  }, Math.max(100, Math.ceil((endAt - ctx.currentTime + 0.12) * 1000)));
+
+  return {
+    endAt,
+    stop: (at: number) => {
+      if (cleaned) {
+        return;
+      }
+      window.clearTimeout(cleanupTimer);
+      const stopAt = Math.max(at, ctx.currentTime);
+      envelope.gain.cancelScheduledValues(stopAt);
+      envelope.gain.setValueAtTime(Math.max(0.0001, envelope.gain.value), stopAt);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, stopAt + 0.05);
+      try {
+        body.stop(stopAt + 0.06);
+      } catch {
+        // noop
+      }
+      try {
+        harmonic.stop(stopAt + 0.06);
+      } catch {
+        // noop
+      }
+      window.setTimeout(() => {
+        cleanup();
+      }, 120);
+    }
+  };
 }
 
 export default function App() {
@@ -149,7 +309,6 @@ export default function App() {
   const [baselineRunning, setBaselineRunning] = useState(false);
   const [baselineTrialId, setBaselineTrialId] = useState<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const baselineAnimationFrameRef = useRef<number | null>(null);
   const baselineStopRef = useRef<(() => void) | null>(null);
   const [sweepAcq, setSweepAcq] = useState<SweepAcquisitionConfig>({
     tone_duration_ms: 180,
@@ -185,10 +344,6 @@ export default function App() {
   }, [score]);
 
   function stopBaselineSweep() {
-    if (baselineAnimationFrameRef.current !== null) {
-      cancelAnimationFrame(baselineAnimationFrameRef.current);
-      baselineAnimationFrameRef.current = null;
-    }
     if (baselineStopRef.current) {
       baselineStopRef.current();
       baselineStopRef.current = null;
@@ -255,35 +410,8 @@ export default function App() {
       await ctx.resume();
     }
 
-    const start = ctx.currentTime + 0.03;
-    const cueDuration = 1.3;
-    const panner3d = createSpatialPanner(ctx, spatialMode, trial.target);
-    const timbre = ctx.createBiquadFilter();
-    timbre.type = "lowpass";
-    timbre.frequency.value = 5200;
-    timbre.Q.value = 0.9;
-
-    const envelope = ctx.createGain();
-    envelope.gain.setValueAtTime(0.0001, start);
-    envelope.gain.exponentialRampToValueAtTime(1, start + 0.04);
-    envelope.gain.setValueAtTime(1, start + cueDuration - 0.08);
-    envelope.gain.exponentialRampToValueAtTime(0.0001, start + cueDuration);
-
-    const master = ctx.createGain();
-    master.gain.value = planarLoudness(trial.target);
-
-    const oscillator = ctx.createOscillator();
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(SPATIAL_REFERENCE_FREQ_HZ, start);
-
-    oscillator.connect(timbre);
-    timbre.connect(envelope);
-    envelope.connect(master);
-    master.connect(panner3d);
-    panner3d.connect(ctx.destination);
-
-    oscillator.start(start);
-    oscillator.stop(start + cueDuration + 0.03);
+    const start = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
+    playSpatialMotifAtPoint(ctx, spatialMode, trial.target, start);
 
     setStatus(`已播放第 ${trial.id} 题提示音，请在空间中点击你感知的位置`);
   }
@@ -302,63 +430,48 @@ export default function App() {
       await ctx.resume();
     }
 
-    const oscillator = ctx.createOscillator();
-    oscillator.type = "sine";
-    oscillator.frequency.value = SPATIAL_REFERENCE_FREQ_HZ;
-
-    const timbre = ctx.createBiquadFilter();
-    timbre.type = "lowpass";
-    timbre.frequency.value = 5200;
-    timbre.Q.value = 0.9;
-
-    const gain = ctx.createGain();
-    gain.gain.value = planarLoudness(baselineSweepPoint(0, spatialMode));
-
-    const panner3d = createSpatialPanner(ctx, spatialMode, baselineSweepPoint(0, spatialMode));
-
-    oscillator.connect(timbre);
-    timbre.connect(gain);
-    gain.connect(panner3d);
-    panner3d.connect(ctx.destination);
-    oscillator.start();
+    const points = baselineReferencePoints(spatialMode);
+    const pointSlotSec = SPATIAL_NOTE_INTERVALS.length * SPATIAL_NOTE_DURATION_SEC + SPATIAL_BASELINE_POINT_GAP_SEC;
+    const timeoutIds: number[] = [];
+    const activeStops: Array<(at: number) => void> = [];
+    const sequenceStartAt = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
+    let cancelled = false;
 
     baselineStopRef.current = () => {
-      try {
-        oscillator.stop();
-      } catch {
-        // noop: oscillator already stopped
-      }
-      oscillator.disconnect();
-      timbre.disconnect();
-      gain.disconnect();
-      panner3d.disconnect();
+      cancelled = true;
+      timeoutIds.forEach((id) => window.clearTimeout(id));
+      const stopAt = ctx.currentTime;
+      activeStops.forEach((stop) => stop(stopAt));
     };
 
-    const durationMs = 5400;
-    const startedAt = performance.now();
-    setStatus(`正在播放第 ${trialId} 题基准音：平滑扫过参考平面...`);
+    setStatus(`正在播放第 ${trialId} 题基准音：依次播报 ${points.length} 个参考点...`);
 
-    const tick = (now: number) => {
-      const progress = Math.min((now - startedAt) / durationMs, 1);
-      const point = baselineSweepPoint(progress, spatialMode);
-      setBaselinePoint(point);
+    let sequenceEndAt = sequenceStartAt;
+    points.forEach((point, idx) => {
+      const pointStartAt = sequenceStartAt + idx * pointSlotSec;
+      const playback = playSpatialMotifAtPoint(ctx, spatialMode, point, pointStartAt);
+      activeStops.push(playback.stop);
+      sequenceEndAt = Math.max(sequenceEndAt, playback.endAt);
 
-      const t = ctx.currentTime;
-      const mapped = spatialPannerPosition(spatialMode, point);
-      gain.gain.setValueAtTime(planarLoudness(point), t);
-      panner3d.positionX.setValueAtTime(mapped.x, t);
-      panner3d.positionY.setValueAtTime(mapped.y, t);
-      panner3d.positionZ.setValueAtTime(mapped.z, t);
+      const visualDelayMs = Math.max(0, Math.round((pointStartAt - ctx.currentTime) * 1000));
+      const timeoutId = window.setTimeout(() => {
+        if (cancelled) {
+          return;
+        }
+        setBaselinePoint(point);
+      }, visualDelayMs);
+      timeoutIds.push(timeoutId);
+    });
 
-      if (progress < 1) {
-        baselineAnimationFrameRef.current = requestAnimationFrame(tick);
-      } else {
-        stopBaselineSweep();
-        setStatus(`第 ${trialId} 题基准音播放完成，请开始选择位置`);
+    const totalMs = Math.max(0, Math.round((sequenceEndAt - ctx.currentTime) * 1000));
+    const finishTimeout = window.setTimeout(() => {
+      if (cancelled) {
+        return;
       }
-    };
-
-    baselineAnimationFrameRef.current = requestAnimationFrame(tick);
+      stopBaselineSweep();
+      setStatus(`第 ${trialId} 题基准音播放完成，请开始选择位置`);
+    }, totalMs);
+    timeoutIds.push(finishTimeout);
   }
 
   function handleSpatialPlaneClick(event: React.MouseEvent<HTMLDivElement>, plane: SpatialPlane) {
