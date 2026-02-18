@@ -186,6 +186,25 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     return audioContextRef.current;
   }
 
+  async function ensureAudioContextReady(ctx: AudioContext): Promise<boolean> {
+    if (ctx.state === "suspended") {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        setStatus("音频初始化失败，请点击页面任意位置后再试");
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function closeAudioContext() {
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      void audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+  }
+
   function currentProfile(): SpatialSceneProfile {
     return resolveSceneProfile(spatialMode, speakerMode2d);
   }
@@ -260,8 +279,9 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
 
   async function playTrialCue(trial: SpatialTrial): Promise<void> {
     const ctx = getAudioContext();
-    if (ctx.state === "suspended") {
-      await ctx.resume();
+    const ready = await ensureAudioContextReady(ctx);
+    if (!ready) {
+      return;
     }
     stopSpatialCue();
 
@@ -303,8 +323,9 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     setBaselinePoint(point);
 
     const ctx = getAudioContext();
-    if (ctx.state === "suspended") {
-      await ctx.resume();
+    const ready = await ensureAudioContextReady(ctx);
+    if (!ready) {
+      return;
     }
 
     const timeoutIds: number[] = [];
@@ -350,8 +371,9 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     setBaselineRunning(true);
 
     const ctx = getAudioContext();
-    if (ctx.state === "suspended") {
-      await ctx.resume();
+    const ready = await ensureAudioContextReady(ctx);
+    if (!ready) {
+      return;
     }
 
     const points = baselineReferencePoints(spatialMode, currentProfile());
@@ -511,6 +533,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     return () => {
       stopBaselineSweep();
       stopSpatialCue();
+      closeAudioContext();
     };
   }, [isSpatialStage]);
 

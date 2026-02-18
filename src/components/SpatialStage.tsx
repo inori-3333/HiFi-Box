@@ -93,6 +93,7 @@ export function SpatialStage(props: SpatialStageProps) {
     currentSpatialTrial,
     completedSpatialTrials,
     spatialAverageScore,
+    spatialAverageBreakdown,
     canGoPrevious,
     setSpatialGuess,
     setSelectedTimbreId,
@@ -336,12 +337,25 @@ export function SpatialStage(props: SpatialStageProps) {
 
         {isCompleted && (
           <>
+            {spatialAverageBreakdown && (
+              <div className="breakdown-summary">
+                <p>平均得分细项：</p>
+                <p className="hint">
+                  空间距离: {spatialAverageBreakdown.cartesian.toFixed(1)} | 方位角: {spatialAverageBreakdown.azimuth.toFixed(1)} | 垂直: {spatialAverageBreakdown.vertical.toFixed(1)} | 距离: {spatialAverageBreakdown.distance.toFixed(1)}
+                </p>
+              </div>
+            )}
             <table className="spatial-result-table">
               <thead>
                 <tr>
                   <th>题号</th>
                   <th>标准落点</th>
                   <th>用户落点</th>
+                  <th>总分</th>
+                  <th>空间距离</th>
+                  <th>方位角</th>
+                  <th>垂直</th>
+                  <th>距离</th>
                 </tr>
               </thead>
               <tbody>
@@ -350,6 +364,11 @@ export function SpatialStage(props: SpatialStageProps) {
                     <td>{trial.id}</td>
                     <td>{formatPoint(trial.target)}</td>
                     <td>{formatPoint(trial.user)}</td>
+                    <td>{trial.score?.toFixed(1) ?? "-"}</td>
+                    <td>{trial.breakdown?.cartesian.toFixed(1) ?? "-"}</td>
+                    <td>{trial.breakdown?.azimuth.toFixed(1) ?? "-"}</td>
+                    <td>{trial.breakdown?.vertical.toFixed(1) ?? "-"}</td>
+                    <td>{trial.breakdown?.distance.toFixed(1) ?? "-"}</td>
                   </tr>
                 ))}
               </tbody>

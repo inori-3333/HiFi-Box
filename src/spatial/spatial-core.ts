@@ -281,7 +281,7 @@ function createSpatialPanner(ctx: AudioContext, mode: SpatialMode, point: Spatia
     positionZ: mapped.z,
     refDistance: 1,
     maxDistance: 12,
-    rolloffFactor: 0
+    rolloffFactor: 1.5
   });
 }
 
@@ -354,6 +354,8 @@ function attachSpatialPlayback(
     }
   };
 
+  let fadeoutTimer: number | null = null;
+
   const cleanupTimer = window.setTimeout(() => {
     cleanup();
   }, Math.max(120, Math.ceil((patch.endAt - ctx.currentTime + 0.18) * 1000)));
@@ -365,6 +367,10 @@ function attachSpatialPlayback(
         return;
       }
       window.clearTimeout(cleanupTimer);
+      if (fadeoutTimer !== null) {
+        window.clearTimeout(fadeoutTimer);
+        fadeoutTimer = null;
+      }
       const stopAt = Math.max(at, ctx.currentTime);
       envelope.gain.cancelScheduledValues(stopAt);
       envelope.gain.setValueAtTime(Math.max(0.0001, envelope.gain.value), stopAt);
@@ -376,8 +382,9 @@ function attachSpatialPlayback(
           // noop
         }
       });
-      window.setTimeout(() => {
+      fadeoutTimer = window.setTimeout(() => {
         cleanup();
+        fadeoutTimer = null;
       }, 120);
     }
   };
