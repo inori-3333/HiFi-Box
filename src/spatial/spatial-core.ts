@@ -107,8 +107,8 @@ function pointDistance(mode: SpatialMode, a: SpatialPoint, b: SpatialPoint): num
 function createRandomPoint(mode: SpatialMode, random: () => number): SpatialPoint {
   if (mode === "2d") {
     return {
-      x: randomInRange(random, -0.94, 0.94),
-      y: randomInRange(random, -0.94, 0.94),
+      x: randomInRange(random, -1.0, 1.0),
+      y: randomInRange(random, -1.0, 1.0),
       z: 0
     };
   }
@@ -121,9 +121,9 @@ function createRandomPoint(mode: SpatialMode, random: () => number): SpatialPoin
 
 export function generateSpatialTargets(mode: SpatialMode, count: number, seed: number): SpatialPoint[] {
   const random = createSeededRandom(seed ^ (mode === "2d" ? 0x2d2d2d2d : 0x3d3d3d3d));
-  const minRadius = mode === "2d" ? 0.3 : 0.42;
-  const maxRadius = (mode === "2d" ? MAX_RADIUS_2D : MAX_RADIUS_3D) * 0.92;
-  const gapSchedule = mode === "2d" ? [0.72, 0.6, 0.5, 0.4, 0.3] : [0.96, 0.82, 0.68, 0.56, 0.44];
+  const minRadius = mode === "2d" ? 0.12 : 0.42;
+  const maxRadius = (mode === "2d" ? MAX_RADIUS_2D : MAX_RADIUS_3D) * (mode === "2d" ? 0.98 : 0.92);
+  const gapSchedule = mode === "2d" ? [0.88, 0.74, 0.62, 0.5, 0.38, 0.28] : [0.96, 0.82, 0.68, 0.56, 0.44];
   const points: SpatialPoint[] = [];
 
   for (const minGap of gapSchedule) {
@@ -145,7 +145,8 @@ export function generateSpatialTargets(mode: SpatialMode, count: number, seed: n
 
   while (points.length < count) {
     const fallback = roundPoint(createRandomPoint(mode, random));
-    if (points.some((existing) => pointDistance(mode, existing, fallback) < 0.2)) {
+    const fallbackMinGap = mode === "2d" ? 0.25 : 0.2;
+    if (points.some((existing) => pointDistance(mode, existing, fallback) < fallbackMinGap)) {
       continue;
     }
     points.push(fallback);
@@ -216,9 +217,11 @@ function normalizeDepth(mode: SpatialMode, z: number): number {
 
 function spatialPannerPosition(mode: SpatialMode, point: SpatialPoint): { x: number; y: number; z: number } {
   const normalizedDepth = normalizeDepth(mode, point.z);
+  const xScale = mode === "2d" ? 2.5 : 1.7;
+  const yScale = mode === "2d" ? 2.2 : 1.3;
   return {
-    x: point.x * 1.7,
-    y: point.y * 1.3,
+    x: point.x * xScale,
+    y: point.y * yScale,
     z: -normalizedDepth * 1.8
   };
 }
@@ -240,10 +243,11 @@ export function baselineReferencePoints(_: SpatialMode): SpatialPoint[] {
 
 function planarLoudness(mode: SpatialMode, point: SpatialPoint): number {
   const depth = normalizeDepth(mode, point.z);
-  const normalizedDistance = Math.min(1, Math.hypot(point.x, point.y, depth) / Math.sqrt(3));
-  const maxGain = 0.34;
-  const minGain = 0.08;
-  const falloff = Math.pow(normalizedDistance, 0.7);
+  const normalizationBase = mode === "2d" ? Math.sqrt(2) : Math.sqrt(3);
+  const normalizedDistance = Math.min(1, Math.hypot(point.x, point.y, depth) / normalizationBase);
+  const maxGain = mode === "2d" ? 0.46 : 0.34;
+  const minGain = mode === "2d" ? 0.015 : 0.08;
+  const falloff = Math.pow(normalizedDistance, mode === "2d" ? 1.25 : 0.7);
   return maxGain - (maxGain - minGain) * falloff;
 }
 

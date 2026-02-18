@@ -195,7 +195,7 @@ td {
 .spatial-arena2d {
   position: relative;
   width: 100%;
-  max-width: 360px;
+  max-width: 460px;
   aspect-ratio: 1 / 1;
   border-radius: 14px;
   border: 1px solid #aac3a3;
@@ -205,7 +205,7 @@ td {
 }
 
 .spatial-arena2d-compact {
-  max-width: 220px;
+  max-width: 300px;
 }
 
 .spatial-self-2d {

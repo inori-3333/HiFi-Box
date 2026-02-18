@@ -181,7 +181,7 @@ export function SpatialStage(props: SpatialStageProps) {
                 type="range"
                 min={-1}
                 max={1}
-                step={0.01}
+                step={spatialMode === "2d" ? 0.005 : 0.01}
                 value={spatialGuess?.x ?? 0}
                 onChange={(e) => {
                   const x = Number.parseFloat(e.target.value);
@@ -195,7 +195,7 @@ export function SpatialStage(props: SpatialStageProps) {
                 type="range"
                 min={-1}
                 max={1}
-                step={0.01}
+                step={spatialMode === "2d" ? 0.005 : 0.01}
                 value={spatialGuess?.y ?? 0}
                 onChange={(e) => {
                   const y = Number.parseFloat(e.target.value);
