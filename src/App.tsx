@@ -38,36 +38,25 @@ type SpatialTrial = {
   target: SpatialPoint;
   user?: SpatialPoint;
   score?: number;
+  breakdown?: SpatialScoreBreakdown;
   revealed: boolean;
+};
+
+type SpatialScoreBreakdown = {
+  cartesian: number;
+  azimuth: number;
+  vertical: number;
+  distance: number;
 };
 
 type SpatialPlane = "xy" | "xz" | "zy";
 type SpatialMode = "2d" | "3d";
 
-const SPATIAL_TARGETS_3D: SpatialPoint[] = [
-  { x: -0.82, y: 0.2, z: 0.78 },
-  { x: -0.64, y: -0.68, z: 0.35 },
-  { x: 0.16, y: 0.72, z: 0.66 },
-  { x: 0.74, y: -0.28, z: 0.44 },
-  { x: -0.34, y: 0.46, z: -0.82 },
-  { x: 0.57, y: -0.18, z: -0.74 },
-  { x: 0.88, y: 0.61, z: -0.22 },
-  { x: -0.18, y: -0.74, z: -0.58 }
-];
-
-const SPATIAL_TARGETS_2D: SpatialPoint[] = [
-  { x: -0.85, y: -0.45, z: 0 },
-  { x: -0.65, y: 0.2, z: 0 },
-  { x: -0.4, y: -0.75, z: 0 },
-  { x: -0.1, y: 0.7, z: 0 },
-  { x: 0.2, y: -0.5, z: 0 },
-  { x: 0.45, y: 0.35, z: 0 },
-  { x: 0.75, y: -0.2, z: 0 },
-  { x: 0.9, y: 0.55, z: 0 }
-];
-
+const SPATIAL_TRIAL_COUNT = 6;
 const MAX_CART_DISTANCE = Math.sqrt(12);
 const MAX_PLANE_DISTANCE = Math.sqrt(8);
+const MAX_RADIUS_2D = Math.sqrt(2);
+const MAX_RADIUS_3D = Math.sqrt(3);
 const SPATIAL_REFERENCE_FREQ_HZ = 392;
 const SPATIAL_NOTE_INTERVALS = [0, 4, 7, 12, 7, 4];
 const SPATIAL_NOTE_DURATION_SEC = 0.11;
@@ -86,22 +75,137 @@ function createSeededRandom(seed: number): () => number {
   };
 }
 
-function shuffleWithSeed<T>(source: T[], seed: number): T[] {
-  const result = [...source];
-  const random = createSeededRandom(seed);
-  for (let idx = result.length - 1; idx > 0; idx -= 1) {
-    const swapIdx = Math.floor(random() * (idx + 1));
-    [result[idx], result[swapIdx]] = [result[swapIdx], result[idx]];
-  }
-  return result;
-}
-
 function resolveSpatialSeed(input: string): number {
   const parsed = Number.parseInt(input, 10);
   if (Number.isFinite(parsed)) {
     return parsed >>> 0;
   }
   return Date.now() >>> 0;
+}
+
+function clampScore(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function scoreFromError(error: number, maxError: number): number {
+  return clampScore(100 - (error / Math.max(maxError, 1e-9)) * 100);
+}
+
+function angleDelta(a: number, b: number): number {
+  const full = Math.PI * 2;
+  const diff = Math.abs(a - b) % full;
+  return diff > Math.PI ? full - diff : diff;
+}
+
+function randomInRange(random: () => number, min: number, max: number): number {
+  return min + random() * (max - min);
+}
+
+function roundPoint(point: SpatialPoint): SpatialPoint {
+  return {
+    x: Number(point.x.toFixed(2)),
+    y: Number(point.y.toFixed(2)),
+    z: Number(point.z.toFixed(2))
+  };
+}
+
+function pointRadius(mode: SpatialMode, point: SpatialPoint): number {
+  return mode === "2d" ? Math.hypot(point.x, point.y) : Math.hypot(point.x, point.y, point.z);
+}
+
+function pointDistance(mode: SpatialMode, a: SpatialPoint, b: SpatialPoint): number {
+  return mode === "2d" ? Math.hypot(a.x - b.x, a.y - b.y) : Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function createRandomPoint(mode: SpatialMode, random: () => number): SpatialPoint {
+  if (mode === "2d") {
+    return {
+      x: randomInRange(random, -0.94, 0.94),
+      y: randomInRange(random, -0.94, 0.94),
+      z: 0
+    };
+  }
+  return {
+    x: randomInRange(random, -0.94, 0.94),
+    y: randomInRange(random, -0.94, 0.94),
+    z: randomInRange(random, -0.94, 0.94)
+  };
+}
+
+function generateSpatialTargets(mode: SpatialMode, count: number, seed: number): SpatialPoint[] {
+  const random = createSeededRandom(seed ^ (mode === "2d" ? 0x2d2d2d2d : 0x3d3d3d3d));
+  const minRadius = mode === "2d" ? 0.3 : 0.42;
+  const maxRadius = (mode === "2d" ? MAX_RADIUS_2D : MAX_RADIUS_3D) * 0.92;
+  const gapSchedule = mode === "2d" ? [0.72, 0.6, 0.5, 0.4, 0.3] : [0.96, 0.82, 0.68, 0.56, 0.44];
+  const points: SpatialPoint[] = [];
+
+  for (const minGap of gapSchedule) {
+    for (let attempt = 0; attempt < 5000 && points.length < count; attempt += 1) {
+      const candidate = roundPoint(createRandomPoint(mode, random));
+      const radius = pointRadius(mode, candidate);
+      if (radius < minRadius || radius > maxRadius) {
+        continue;
+      }
+      if (points.some((existing) => pointDistance(mode, existing, candidate) < minGap)) {
+        continue;
+      }
+      points.push(candidate);
+    }
+    if (points.length >= count) {
+      break;
+    }
+  }
+
+  while (points.length < count) {
+    const fallback = roundPoint(createRandomPoint(mode, random));
+    if (points.some((existing) => pointDistance(mode, existing, fallback) < 0.2)) {
+      continue;
+    }
+    points.push(fallback);
+  }
+  return points.slice(0, count);
+}
+
+function computeSpatialBreakdown(
+  mode: SpatialMode,
+  target: SpatialPoint,
+  guess: SpatialPoint
+): { score: number; breakdown: SpatialScoreBreakdown } {
+  const dx = guess.x - target.x;
+  const dy = guess.y - target.y;
+  const dz = guess.z - target.z;
+  const cartesianError = mode === "2d" ? Math.hypot(dx, dy) : Math.hypot(dx, dy, dz);
+  const cartesianScore = scoreFromError(cartesianError, mode === "2d" ? MAX_PLANE_DISTANCE : MAX_CART_DISTANCE);
+
+  const targetAzimuth = mode === "2d" ? Math.atan2(target.y, target.x) : Math.atan2(target.z, target.x);
+  const guessAzimuth = mode === "2d" ? Math.atan2(guess.y, guess.x) : Math.atan2(guess.z, guess.x);
+  const azimuthScore = scoreFromError(angleDelta(targetAzimuth, guessAzimuth), Math.PI);
+
+  const verticalScore = scoreFromError(Math.abs(dy), 2);
+
+  const radialError = Math.abs(pointRadius(mode, target) - pointRadius(mode, guess));
+  const distanceScore = scoreFromError(radialError, mode === "2d" ? MAX_RADIUS_2D : MAX_RADIUS_3D);
+
+  const weights =
+    mode === "2d"
+      ? { cartesian: 0.4, azimuth: 0.3, vertical: 0.2, distance: 0.1 }
+      : { cartesian: 0.35, azimuth: 0.3, vertical: 0.2, distance: 0.15 };
+  const score = clampScore(
+    cartesianScore * weights.cartesian +
+      azimuthScore * weights.azimuth +
+      verticalScore * weights.vertical +
+      distanceScore * weights.distance
+  );
+
+  return {
+    score,
+    breakdown: {
+      cartesian: cartesianScore,
+      azimuth: azimuthScore,
+      vertical: verticalScore,
+      distance: distanceScore
+    }
+  };
 }
 
 function clamp01ToSigned(value: number): number {
@@ -363,6 +467,46 @@ export default function App() {
   const outputDevices = useMemo(() => devices.filter((d) => d.id.startsWith("output::")), [devices]);
   const currentSpatialTrial = spatialTrials[spatialIndex];
   const currentSpatialRevealed = currentSpatialTrial?.revealed ?? false;
+  const completedSpatialTrials = useMemo(
+    () => spatialTrials.filter((trial) => trial.revealed && trial.score !== undefined),
+    [spatialTrials]
+  );
+  const spatialAverageScore = useMemo(() => {
+    if (completedSpatialTrials.length === 0) {
+      return 0;
+    }
+    return completedSpatialTrials.reduce((acc, trial) => acc + (trial.score ?? 0), 0) / completedSpatialTrials.length;
+  }, [completedSpatialTrials]);
+  const spatialAverageBreakdown = useMemo(() => {
+    if (completedSpatialTrials.length === 0) {
+      return null;
+    }
+    const totals = completedSpatialTrials.reduce(
+      (acc, trial) => {
+        const breakdown = trial.breakdown;
+        if (!breakdown) {
+          return acc;
+        }
+        return {
+          count: acc.count + 1,
+          cartesian: acc.cartesian + breakdown.cartesian,
+          azimuth: acc.azimuth + breakdown.azimuth,
+          vertical: acc.vertical + breakdown.vertical,
+          distance: acc.distance + breakdown.distance
+        };
+      },
+      { count: 0, cartesian: 0, azimuth: 0, vertical: 0, distance: 0 }
+    );
+    if (totals.count === 0) {
+      return null;
+    }
+    return {
+      cartesian: totals.cartesian / totals.count,
+      azimuth: totals.azimuth / totals.count,
+      vertical: totals.vertical / totals.count,
+      distance: totals.distance / totals.count
+    };
+  }, [completedSpatialTrials]);
 
   const radarData = useMemo(() => {
     if (!score) {
@@ -405,10 +549,9 @@ export default function App() {
   }
 
   function startSpatialTest(mode: SpatialMode) {
-    const source = mode === "2d" ? SPATIAL_TARGETS_2D : SPATIAL_TARGETS_3D;
     const seed = resolveSpatialSeed(spatialSeedInput);
-    const shuffled = shuffleWithSeed(source, seed).slice(0, 6);
-    const trials = shuffled.map((target, idx) => ({
+    const targets = generateSpatialTargets(mode, SPATIAL_TRIAL_COUNT, seed);
+    const trials = targets.map((target, idx) => ({
       id: idx + 1,
       target,
       revealed: false
@@ -553,18 +696,20 @@ export default function App() {
       setStatus(spatialMode === "2d" ? "请先在 2D 区域选择位置后再提交" : "请先在三视图中选择一个空间位置后再提交");
       return;
     }
-    const dx = spatialGuess.x - currentSpatialTrial.target.x;
-    const dy = spatialGuess.y - currentSpatialTrial.target.y;
-    const dz = spatialGuess.z - currentSpatialTrial.target.z;
-    const distance = spatialMode === "2d" ? Math.hypot(dx, dy) : Math.sqrt(dx * dx + dy * dy + dz * dz);
-    const denominator = spatialMode === "2d" ? MAX_PLANE_DISTANCE : MAX_CART_DISTANCE;
-    const scoreValue = Math.max(0, Math.min(100, 100 - (distance / denominator) * 100));
+    const result = computeSpatialBreakdown(spatialMode, currentSpatialTrial.target, spatialGuess);
+    const scoreValue = result.score;
 
     const nextTrials = spatialTrials.map((item, idx) =>
-      idx === spatialIndex ? { ...item, user: spatialGuess, score: scoreValue, revealed: true } : item
+      idx === spatialIndex
+        ? { ...item, user: spatialGuess, score: scoreValue, breakdown: result.breakdown, revealed: true }
+        : item
     );
     setSpatialTrials(nextTrials);
-    setStatus(`第 ${currentSpatialTrial.id} 题已揭晓，空间结像得分 ${scoreValue.toFixed(1)}`);
+    setStatus(
+      `第 ${currentSpatialTrial.id} 题已揭晓，得分 ${scoreValue.toFixed(1)}（方位 ${result.breakdown.azimuth.toFixed(1)} / ${
+        spatialMode === "3d" ? "高度" : "纵向"
+      } ${result.breakdown.vertical.toFixed(1)} / 距离 ${result.breakdown.distance.toFixed(1)}）`
+    );
   }
 
   function gotoNextSpatialTrial() {
@@ -971,6 +1116,14 @@ export default function App() {
               </div>
               <p className="hint">黄点=基准音位置，蓝点=你的选择，红点=标准答案。</p>
               {currentSpatialTrial?.revealed && <p>本题得分: {currentSpatialTrial.score?.toFixed(1)}</p>}
+              {currentSpatialTrial?.revealed && currentSpatialTrial.breakdown && (
+                <p className="hint">
+                  分项: 定位 {currentSpatialTrial.breakdown.cartesian.toFixed(1)} / 方位{" "}
+                  {currentSpatialTrial.breakdown.azimuth.toFixed(1)} / 高度{" "}
+                  {currentSpatialTrial.breakdown.vertical.toFixed(1)} / 距离{" "}
+                  {currentSpatialTrial.breakdown.distance.toFixed(1)}
+                </p>
+              )}
               <div className="submit-row">
                 <button disabled={busy || !spatialGuess || baselineRunning || currentSpatialRevealed} onClick={submitSpatialGuess}>
                   提交并揭晓
@@ -1012,6 +1165,14 @@ export default function App() {
               </div>
               <p className="hint">黄点=基准音位置，蓝点=你的选择，红点=标准答案，中心点=你所在位置</p>
               {currentSpatialTrial?.revealed && <p>本题得分: {currentSpatialTrial.score?.toFixed(1)}</p>}
+              {currentSpatialTrial?.revealed && currentSpatialTrial.breakdown && (
+                <p className="hint">
+                  分项: 定位 {currentSpatialTrial.breakdown.cartesian.toFixed(1)} / 方位{" "}
+                  {currentSpatialTrial.breakdown.azimuth.toFixed(1)} / 纵向{" "}
+                  {currentSpatialTrial.breakdown.vertical.toFixed(1)} / 距离{" "}
+                  {currentSpatialTrial.breakdown.distance.toFixed(1)}
+                </p>
+              )}
               <div className="submit-row">
                 <button disabled={busy || !spatialGuess || baselineRunning || currentSpatialRevealed} onClick={submitSpatialGuess}>
                   提交并揭晓
@@ -1023,15 +1184,16 @@ export default function App() {
           <div className="card">
             <h2>测试汇总</h2>
             <p>
-              已完成 {spatialTrials.filter((t) => t.revealed).length}/{spatialTrials.length}
+              已完成 {completedSpatialTrials.length}/{spatialTrials.length}
             </p>
-            <p>
-              平均分:{" "}
-              {(
-                spatialTrials.filter((t) => t.score !== undefined).reduce((acc, t) => acc + (t.score ?? 0), 0) /
-                Math.max(1, spatialTrials.filter((t) => t.score !== undefined).length)
-              ).toFixed(1)}
-            </p>
+            <p>平均分: {spatialAverageScore.toFixed(1)}</p>
+            {spatialAverageBreakdown && (
+              <p className="hint">
+                分项均分: 定位 {spatialAverageBreakdown.cartesian.toFixed(1)} / 方位{" "}
+                {spatialAverageBreakdown.azimuth.toFixed(1)} / {spatialMode === "3d" ? "高度" : "纵向"}{" "}
+                {spatialAverageBreakdown.vertical.toFixed(1)} / 距离 {spatialAverageBreakdown.distance.toFixed(1)}
+              </p>
+            )}
             <button onClick={() => setStage("home")}>返回首页</button>
           </div>
         </section>
