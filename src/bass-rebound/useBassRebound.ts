@@ -33,6 +33,7 @@ export function useBassRebound(options: UseBassReboundOptions): BassReboundContr
   const scheduleRef = useRef<{ stop: () => void } | null>(null);
   const rafIdRef = useRef<number | null>(null);
   const testStartAtRef = useRef<number | null>(null);
+  const isRunningRef = useRef<boolean>(false);
 
   const stopTest = useCallback(() => {
     // 停止动画帧
@@ -47,6 +48,7 @@ export function useBassRebound(options: UseBassReboundOptions): BassReboundContr
       scheduleRef.current = null;
     }
 
+    isRunningRef.current = false;
     testStartAtRef.current = null;
     setIsRunning(false);
     setStatus("测试已停止");
@@ -65,10 +67,10 @@ export function useBassRebound(options: UseBassReboundOptions): BassReboundContr
     const currentMax = currentBpmAtElapsed(elapsed);
     setMaxBpmReached((prev) => Math.max(prev, currentMax));
 
-    if (isRunning && elapsed < TEST_DURATION_SEC) {
+    if (isRunningRef.current && elapsed < TEST_DURATION_SEC) {
       rafIdRef.current = window.requestAnimationFrame(updateProgress);
     }
-  }, [isRunning]);
+  }, []);
 
   const startTest = useCallback(async () => {
     stopTest();
@@ -99,6 +101,7 @@ export function useBassRebound(options: UseBassReboundOptions): BassReboundContr
       },
       () => {
         // 测试完成
+        isRunningRef.current = false;
         setIsRunning(false);
         setProgress(100);
         if (rafIdRef.current !== null) {
@@ -109,6 +112,7 @@ export function useBassRebound(options: UseBassReboundOptions): BassReboundContr
       }
     );
 
+    isRunningRef.current = true;
     setIsRunning(true);
     setStatus(`低频回弹测试开始：${BPM_START}BPM → ${BPM_END}BPM（${TEST_DURATION_SEC}秒）`);
 
