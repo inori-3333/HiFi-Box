@@ -11,6 +11,7 @@ import {
 import { api } from "./api";
 import { BassReboundStage } from "./components/BassReboundStage";
 import { HearingSweepStage } from "./components/HearingSweepStage";
+import { SoundFieldStage } from "./components/SoundFieldStage";
 import { SpatialStage } from "./components/SpatialStage";
 import { useSpatialTest } from "./spatial/useSpatialTest";
 import type {
@@ -29,7 +30,7 @@ const SAMPLE_RATE = 48_000;
 const APP_VERSION = "0.1.0";
 const IS_TAURI_RUNTIME = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-type Stage = "home" | "wizard" | "result" | "spatial" | "hearing-sweep" | "bass-rebound";
+type Stage = "home" | "wizard" | "result" | "spatial" | "hearing-sweep" | "bass-rebound" | "soundfield";
 
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
@@ -305,6 +306,15 @@ export default function App() {
               >
                 低频回弹测试
               </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setStage("soundfield");
+                  setStatus("进入声场测试");
+                }}
+              >
+                声场测试
+              </button>
               {!isWebDemo && (
                 <button disabled={busy} onClick={refreshHistory}>
                   刷新历史
@@ -344,6 +354,10 @@ export default function App() {
 
       {stage === "bass-rebound" && (
         <BassReboundStage busy={busy} setStatus={setStatus} onBackHome={() => setStage("home")} />
+      )}
+
+      {stage === "soundfield" && (
+        <SoundFieldStage busy={busy} setStatus={setStatus} onBackHome={() => setStage("home")} />
       )}
 
       {stage === "wizard" && (
