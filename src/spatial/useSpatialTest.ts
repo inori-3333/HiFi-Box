@@ -10,13 +10,9 @@ import {
   playSpatialCueAtPoint,
   resolveSpatialSeed
 } from "./spatial-core";
-import type { SpatialMode, SpatialPoint, SpatialTrial } from "./spatial-core";
+import type { SpatialMode, SpatialPoint, SpatialSceneProfile, SpatialTrial } from "./spatial-core";
 
-const BASELINE_ROUNDS = 2;
-const BASELINE_TONES_PER_ROUND = SPATIAL_CUE_TIMBRE_COUNT;
-const BASELINE_TOTAL_TONES = 18;
-const BASELINE_POSITION_CYCLES = 2;
-const BASELINE_TIMBRE_SHUFFLE_RETRY_LIMIT = 24;
+const BASELINE_POSITION_CYCLES = 1;
 const BASELINE_AUTOPLAY_DELAY_MS = 1000;
 const BASELINE_INTER_TONE_GAP_SEC = 0.6;
 const BASELINE_REPEAT_COUNT_PER_TONE = 2;
@@ -42,6 +38,8 @@ export type SpatialTestController = {
   spatialIndex: number;
   spatialGuess: SpatialPoint | null;
   spatialMode: SpatialMode;
+  speakerMode2d: boolean;
+  selectedTimbreId: number;
   spatialSeedInput: string;
   spatialSeed: number | null;
   baselinePoint: SpatialPoint | null;
@@ -50,56 +48,48 @@ export type SpatialTestController = {
   completedSpatialTrials: SpatialTrial[];
   spatialAverageScore: number;
   spatialAverageBreakdown: SpatialAverageBreakdown | null;
+  canGoPrevious: boolean;
   setSpatialSeedInput: (value: string) => void;
   setSpatialGuess: Dispatch<SetStateAction<SpatialPoint | null>>;
+  setSelectedTimbreId: (value: number) => void;
+  setSpeakerMode2d: (enabled: boolean) => void;
   startSpatialTest: (mode: SpatialMode) => void;
   startAnswering: () => void;
   playSpatialCue: () => Promise<void>;
   playBaselineSweep: () => Promise<void>;
+  selectAndReplayBaselinePoint: (point: SpatialPoint) => void;
   submitSpatialGuess: () => void;
+  goToPreviousTrial: () => void;
   resetSpatialGuess: () => void;
 };
 
-function shuffleTimbres(values: number[]): number[] {
-  const shuffled = values.slice();
-  for (let idx = shuffled.length - 1; idx > 0; idx -= 1) {
-    const swapIdx = Math.floor(Math.random() * (idx + 1));
-    [shuffled[idx], shuffled[swapIdx]] = [shuffled[swapIdx], shuffled[idx]];
+function normalizeTimbreId(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
   }
-  return shuffled;
+  const rounded = Math.floor(value);
+  const normalized = rounded % SPATIAL_CUE_TIMBRE_COUNT;
+  return normalized < 0 ? normalized + SPATIAL_CUE_TIMBRE_COUNT : normalized;
 }
 
-function hasAdjacentDuplicate(values: number[]): boolean {
-  for (let idx = 1; idx < values.length; idx += 1) {
-    if (values[idx] === values[idx - 1]) {
-      return true;
-    }
-  }
-  return false;
+function resolveSceneProfile(mode: SpatialMode, speakerMode2d: boolean): SpatialSceneProfile {
+  return mode === "2d" && speakerMode2d ? "speaker2d" : "standard";
 }
 
-function createBaselineTimbreSequence(): number[] {
-  const base = Array.from({ length: BASELINE_ROUNDS }, () =>
-    Array.from({ length: BASELINE_TONES_PER_ROUND }, (_, timbreId) => timbreId)
-  ).flat();
-  const extraPool = Array.from({ length: BASELINE_TONES_PER_ROUND }, (_, timbreId) => timbreId);
-  const extra = shuffleTimbres(extraPool).slice(0, 2);
-  const sequence = base.concat(extra);
-
-  let fallback = shuffleTimbres(sequence);
-  if (!hasAdjacentDuplicate(fallback)) {
-    return fallback;
+function defaultGuess(mode: SpatialMode, speakerMode2d: boolean): SpatialPoint {
+  if (mode === "2d" && speakerMode2d) {
+    return { x: 0, y: -0.5, z: 0 };
   }
+  return { x: 0, y: 0, z: 0 };
+}
 
-  for (let attempt = 0; attempt < BASELINE_TIMBRE_SHUFFLE_RETRY_LIMIT; attempt += 1) {
-    const shuffled = shuffleTimbres(sequence);
-    if (!hasAdjacentDuplicate(shuffled)) {
-      return shuffled;
-    }
-    fallback = shuffled;
-  }
-
-  return fallback;
+function buildTrials(mode: SpatialMode, profile: SpatialSceneProfile, count: number, seed: number, timbreId: number): SpatialTrial[] {
+  const targets = generateSpatialTargets(mode, count, seed, profile);
+  return targets.map((target, idx) => ({
+    id: idx + 1,
+    target,
+    cueTimbreId: timbreId
+  }));
 }
 
 export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestController {
@@ -109,6 +99,8 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
   const [spatialIndex, setSpatialIndex] = useState(0);
   const [spatialGuess, setSpatialGuess] = useState<SpatialPoint | null>(null);
   const [spatialMode, setSpatialMode] = useState<SpatialMode>("3d");
+  const [speakerMode2d, setSpeakerMode2dState] = useState(false);
+  const [selectedTimbreId, setSelectedTimbreIdState] = useState(0);
   const [spatialSeedInput, setSpatialSeedInput] = useState("");
   const [spatialSeed, setSpatialSeed] = useState<number | null>(null);
   const [baselinePoint, setBaselinePoint] = useState<SpatialPoint | null>(null);
@@ -161,6 +153,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       distance: totals.distance / totals.count
     };
   }, [completedSpatialTrials]);
+  const canGoPrevious = phase === "testing" && spatialIndex > 0;
 
   function stopSpatialCue() {
     if (cueStopTimeoutRef.current !== null) {
@@ -186,14 +179,38 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     setBaselinePoint(null);
   }
 
+  function getAudioContext(): AudioContext {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    return audioContextRef.current;
+  }
+
+  function currentProfile(): SpatialSceneProfile {
+    return resolveSceneProfile(spatialMode, speakerMode2d);
+  }
+
+  function replaceTrialsForCurrentConfig(nextSpeakerMode2d: boolean, nextTimbreId: number) {
+    if (spatialSeed === null) {
+      return;
+    }
+    const profile = resolveSceneProfile(spatialMode, nextSpeakerMode2d);
+    const trials = buildTrials(spatialMode, profile, SPATIAL_TRIAL_COUNT, spatialSeed, nextTimbreId);
+    setSpatialTrials(trials);
+    setSpatialIndex(0);
+    setSpatialGuess(defaultGuess(spatialMode, nextSpeakerMode2d));
+    setPhase("pretest");
+    setPretestBaselinePlayed(false);
+    stopBaselineSweep();
+    stopSpatialCue();
+  }
+
   function startSpatialTest(mode: SpatialMode) {
     const seed = resolveSpatialSeed(spatialSeedInput);
-    const targets = generateSpatialTargets(mode, SPATIAL_TRIAL_COUNT, seed);
-    const trials = targets.map((target, idx) => ({
-      id: idx + 1,
-      target,
-      cueTimbreId: idx % SPATIAL_CUE_TIMBRE_COUNT
-    }));
+    const initialSpeakerMode2d = false;
+    const timbreId = 0;
+    const profile = resolveSceneProfile(mode, initialSpeakerMode2d);
+    const trials = buildTrials(mode, profile, SPATIAL_TRIAL_COUNT, seed, timbreId);
 
     stopBaselineSweep();
     stopSpatialCue();
@@ -201,7 +218,9 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     setSpatialTrials(trials);
     setSpatialIndex(0);
     setSpatialMode(mode);
-    setSpatialGuess({ x: 0, y: 0, z: 0 });
+    setSpeakerMode2dState(initialSpeakerMode2d);
+    setSelectedTimbreIdState(timbreId);
+    setSpatialGuess(defaultGuess(mode, initialSpeakerMode2d));
     setPhase("pretest");
     setPretestBaselinePlayed(false);
     onEnterSpatialStage();
@@ -212,11 +231,31 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     );
   }
 
-  function getAudioContext(): AudioContext {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContext();
+  function setSelectedTimbreId(value: number) {
+    const next = normalizeTimbreId(value);
+    if (phase !== "pretest") {
+      setStatus("开始测试后不允许切换基准音色");
+      return;
     }
-    return audioContextRef.current;
+    setSelectedTimbreIdState(next);
+    setSpatialTrials((old) => old.map((trial) => ({ ...trial, cueTimbreId: next })));
+    setStatus(`已切换基准音色为 #${next + 1}`);
+  }
+
+  function setSpeakerMode2d(enabled: boolean) {
+    if (spatialMode !== "2d") {
+      return;
+    }
+    if (phase !== "pretest") {
+      setStatus("开始测试后不允许切换音响模式");
+      return;
+    }
+    if (speakerMode2d === enabled) {
+      return;
+    }
+    setSpeakerMode2dState(enabled);
+    replaceTrialsForCurrentConfig(enabled, selectedTimbreId);
+    setStatus(enabled ? "已开启音响模式（仅第3/4象限）" : "已关闭音响模式（恢复全平面）");
   }
 
   async function playTrialCue(trial: SpatialTrial): Promise<void> {
@@ -239,7 +278,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       cueStopTimeoutRef.current = null;
     }, Math.max(100, Math.ceil((playback.endAt - ctx.currentTime + 0.15) * 1000)));
 
-    setStatus(`已播放第 ${trial.id} 题提示音，请选择位置后提交。可重复点击“播放提示音”重听。`);
+    setStatus(`已播放第 ${trial.id} 题提示音（音色 #${trial.cueTimbreId + 1}），请选择位置后提交。`);
   }
 
   async function playSpatialCue() {
@@ -251,6 +290,50 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       return;
     }
     await playTrialCue(currentSpatialTrial);
+  }
+
+  async function playSingleBaselinePoint(point: SpatialPoint) {
+    if (phase !== "pretest") {
+      setStatus("开始测试后不允许播放基准音");
+      return;
+    }
+    stopBaselineSweep();
+    stopSpatialCue();
+    setBaselineRunning(true);
+    setBaselinePoint(point);
+
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+
+    const timeoutIds: number[] = [];
+    const activeStops: Array<(at: number) => void> = [];
+    let cancelled = false;
+    baselineStopRef.current = () => {
+      cancelled = true;
+      timeoutIds.forEach((id) => window.clearTimeout(id));
+      const stopAt = ctx.currentTime;
+      activeStops.forEach((stop) => stop(stopAt));
+    };
+
+    const startAt = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
+    let endAt = startAt;
+    for (let repeatIdx = 0; repeatIdx < BASELINE_REPEAT_COUNT_PER_TONE; repeatIdx += 1) {
+      const playback = playSpatialCueAtPoint(ctx, spatialMode, point, endAt, selectedTimbreId);
+      activeStops.push(playback.stop);
+      endAt = playback.endAt;
+    }
+
+    const totalMs = Math.max(0, Math.round((endAt - ctx.currentTime) * 1000));
+    const finishTimeout = window.setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
+      stopBaselineSweep();
+      setStatus(`单点基准音播放完成（音色 #${selectedTimbreId + 1}）。`);
+    }, totalMs);
+    timeoutIds.push(finishTimeout);
   }
 
   async function playBaselineSweep() {
@@ -271,9 +354,8 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       await ctx.resume();
     }
 
-    const points = baselineReferencePoints(spatialMode);
+    const points = baselineReferencePoints(spatialMode, currentProfile());
     const baselineToneCount = points.length * BASELINE_POSITION_CYCLES;
-    const timbreSequence = createBaselineTimbreSequence();
     const timeoutIds: number[] = [];
     const activeStops: Array<(at: number) => void> = [];
     const sequenceStartAt = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
@@ -286,16 +368,13 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       activeStops.forEach((stop) => stop(stopAt));
     };
 
-    setStatus(
-      `正在播放基准音：${BASELINE_TOTAL_TONES} 个基准音（每个连放 ${BASELINE_REPEAT_COUNT_PER_TONE} 次，组间隔 ${BASELINE_INTER_TONE_GAP_SEC.toFixed(1)}s）...`
-    );
+    setStatus(`正在播放基准音：9 点单轮（每点连放 ${BASELINE_REPEAT_COUNT_PER_TONE} 次，音色 #${selectedTimbreId + 1}）...`);
 
     let sequenceEndAt = sequenceStartAt;
     let toneStartAt = sequenceStartAt;
     for (let idx = 0; idx < baselineToneCount; idx += 1) {
-      const timbreId = timbreSequence[idx % timbreSequence.length];
       const point = points[idx % points.length];
-      const firstPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, toneStartAt, timbreId);
+      const firstPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, toneStartAt, selectedTimbreId);
       activeStops.push(firstPlayback.stop);
       sequenceEndAt = Math.max(sequenceEndAt, firstPlayback.endAt);
 
@@ -310,7 +389,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
 
       let repeatEndAt = firstPlayback.endAt;
       for (let repeatIdx = 1; repeatIdx < BASELINE_REPEAT_COUNT_PER_TONE; repeatIdx += 1) {
-        const repeatPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, repeatEndAt, timbreId);
+        const repeatPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, repeatEndAt, selectedTimbreId);
         activeStops.push(repeatPlayback.stop);
         repeatEndAt = repeatPlayback.endAt;
         sequenceEndAt = Math.max(sequenceEndAt, repeatPlayback.endAt);
@@ -325,9 +404,13 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
         return;
       }
       stopBaselineSweep();
-      setStatus("基准音播放完成。可重播基准音，准备好后点击“开始测试”。");
+      setStatus("基准音播放完成。可点击图中任意位置立即重播单点基准音，或开始测试。");
     }, totalMs);
     timeoutIds.push(finishTimeout);
+  }
+
+  function selectAndReplayBaselinePoint(point: SpatialPoint) {
+    void playSingleBaselinePoint(point);
   }
 
   function startAnswering() {
@@ -344,7 +427,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     }
     stopBaselineSweep();
     setSpatialIndex(0);
-    setSpatialGuess({ x: 0, y: 0, z: 0 });
+    setSpatialGuess(defaultGuess(spatialMode, speakerMode2d));
     setPhase("testing");
     setStatus("已开始测试，正在播放第 1 题提示音...");
     void playTrialCue(spatialTrials[0]);
@@ -358,21 +441,16 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     if (!currentSpatialTrial) {
       return;
     }
-    if (currentSpatialTrial.submitted) {
-      setStatus(`第 ${currentSpatialTrial.id} 题已提交`);
-      return;
-    }
     if (!spatialGuess) {
       setStatus(spatialMode === "2d" ? "请先在 2D 区域选择位置后再提交" : "请先在三视图中选择一个空间位置后再提交");
       return;
     }
 
-    const result = computeSpatialBreakdown(spatialMode, currentSpatialTrial.target, spatialGuess);
+    const guess = spatialMode === "2d" && speakerMode2d ? { ...spatialGuess, y: Math.min(0, spatialGuess.y), z: 0 } : spatialGuess;
+    const result = computeSpatialBreakdown(spatialMode, currentSpatialTrial.target, guess);
     const finishedTrialId = currentSpatialTrial.id;
     const nextTrials = spatialTrials.map((item, idx) =>
-      idx === spatialIndex
-        ? { ...item, user: spatialGuess, score: result.score, breakdown: result.breakdown, submitted: true }
-        : item
+      idx === spatialIndex ? { ...item, user: guess, score: result.score, breakdown: result.breakdown, submitted: true } : item
     );
     setSpatialTrials(nextTrials);
 
@@ -391,8 +469,20 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     void playTrialCue(nextTrial);
   }
 
+  function goToPreviousTrial() {
+    if (phase !== "testing" || spatialIndex <= 0) {
+      return;
+    }
+    stopSpatialCue();
+    const previousIndex = spatialIndex - 1;
+    const previousTrial = spatialTrials[previousIndex];
+    setSpatialIndex(previousIndex);
+    setSpatialGuess(previousTrial?.user ?? defaultGuess(spatialMode, speakerMode2d));
+    setStatus(`已返回第 ${previousIndex + 1} 题，可重听并修改答案。`);
+  }
+
   function resetSpatialGuess() {
-    setSpatialGuess({ x: 0, y: 0, z: 0 });
+    setSpatialGuess(defaultGuess(spatialMode, speakerMode2d));
   }
 
   useEffect(() => {
@@ -410,7 +500,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
         pretestAutoplayTimeoutRef.current = null;
       }
     };
-  }, [isSpatialStage, phase, pretestBaselinePlayed, spatialMode, spatialTrials]);
+  }, [isSpatialStage, phase, pretestBaselinePlayed, spatialMode, speakerMode2d, spatialTrials, selectedTimbreId]);
 
   useEffect(() => {
     if (!isSpatialStage) {
@@ -430,6 +520,8 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     spatialIndex,
     spatialGuess,
     spatialMode,
+    speakerMode2d,
+    selectedTimbreId,
     spatialSeedInput,
     spatialSeed,
     baselinePoint,
@@ -438,13 +530,18 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     completedSpatialTrials,
     spatialAverageScore,
     spatialAverageBreakdown,
+    canGoPrevious,
     setSpatialSeedInput,
     setSpatialGuess,
+    setSelectedTimbreId,
+    setSpeakerMode2d,
     startSpatialTest,
     startAnswering,
     playSpatialCue,
     playBaselineSweep,
+    selectAndReplayBaselinePoint,
     submitSpatialGuess,
+    goToPreviousTrial,
     resetSpatialGuess
   };
 }

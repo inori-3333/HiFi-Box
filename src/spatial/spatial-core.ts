@@ -23,6 +23,7 @@ export type SpatialTrial = {
 
 export type SpatialPlane = "xy" | "xz" | "zy";
 export type SpatialMode = "2d" | "3d";
+export type SpatialSceneProfile = "standard" | "speaker2d";
 
 export const SPATIAL_TRIAL_COUNT = 8;
 export const SPATIAL_CUE_TIMBRE_COUNT = 8;
@@ -104,11 +105,12 @@ function pointDistance(mode: SpatialMode, a: SpatialPoint, b: SpatialPoint): num
   return mode === "2d" ? Math.hypot(a.x - b.x, a.y - b.y) : Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
-function createRandomPoint(mode: SpatialMode, random: () => number): SpatialPoint {
+function createRandomPoint(mode: SpatialMode, random: () => number, profile: SpatialSceneProfile): SpatialPoint {
   if (mode === "2d") {
+    const yMax = profile === "speaker2d" ? 0.0 : 1.0;
     return {
       x: randomInRange(random, -1.0, 1.0),
-      y: randomInRange(random, -1.0, 1.0),
+      y: randomInRange(random, -1.0, yMax),
       z: 0
     };
   }
@@ -119,7 +121,12 @@ function createRandomPoint(mode: SpatialMode, random: () => number): SpatialPoin
   };
 }
 
-export function generateSpatialTargets(mode: SpatialMode, count: number, seed: number): SpatialPoint[] {
+export function generateSpatialTargets(
+  mode: SpatialMode,
+  count: number,
+  seed: number,
+  profile: SpatialSceneProfile = "standard"
+): SpatialPoint[] {
   const random = createSeededRandom(seed ^ (mode === "2d" ? 0x2d2d2d2d : 0x3d3d3d3d));
   const minRadius = mode === "2d" ? 0.12 : 0.42;
   const maxRadius = (mode === "2d" ? MAX_RADIUS_2D : MAX_RADIUS_3D) * (mode === "2d" ? 0.98 : 0.92);
@@ -128,7 +135,7 @@ export function generateSpatialTargets(mode: SpatialMode, count: number, seed: n
 
   for (const minGap of gapSchedule) {
     for (let attempt = 0; attempt < 5000 && points.length < count; attempt += 1) {
-      const candidate = roundPoint(createRandomPoint(mode, random));
+      const candidate = roundPoint(createRandomPoint(mode, random, profile));
       const radius = pointRadius(mode, candidate);
       if (radius < minRadius || radius > maxRadius) {
         continue;
@@ -144,7 +151,7 @@ export function generateSpatialTargets(mode: SpatialMode, count: number, seed: n
   }
 
   while (points.length < count) {
-    const fallback = roundPoint(createRandomPoint(mode, random));
+    const fallback = roundPoint(createRandomPoint(mode, random, profile));
     const fallbackMinGap = mode === "2d" ? 0.25 : 0.2;
     if (points.some((existing) => pointDistance(mode, existing, fallback) < fallbackMinGap)) {
       continue;
@@ -226,8 +233,21 @@ function spatialPannerPosition(mode: SpatialMode, point: SpatialPoint): { x: num
   };
 }
 
-export function baselineReferencePoints(_: SpatialMode): SpatialPoint[] {
+export function baselineReferencePoints(mode: SpatialMode, profile: SpatialSceneProfile = "standard"): SpatialPoint[] {
   const z = 0;
+  if (mode === "2d" && profile === "speaker2d") {
+    return [
+      { x: 0, y: 0, z },
+      { x: 0.9, y: 0, z },
+      { x: -0.9, y: 0, z },
+      { x: 0, y: -0.9, z },
+      { x: 0.55, y: -0.55, z },
+      { x: -0.55, y: -0.55, z },
+      { x: 0.25, y: -0.75, z },
+      { x: -0.25, y: -0.75, z },
+      { x: 0, y: -0.45, z }
+    ];
+  }
   return [
     { x: 0, y: 0, z },
     { x: 0.9, y: 0, z },

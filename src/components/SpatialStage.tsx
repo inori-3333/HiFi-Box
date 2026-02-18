@@ -24,6 +24,7 @@ type ArenaFigureProps = {
   targetPoint?: SpatialPoint;
   baselinePoint?: SpatialPoint;
   compact?: boolean;
+  speakerMode?: boolean;
   onClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
 };
 
@@ -59,14 +60,20 @@ function PlaneFigure(props: PlaneFigureProps) {
 }
 
 function ArenaFigure(props: ArenaFigureProps) {
-  const { userPoint, targetPoint, baselinePoint, compact = false, onClick } = props;
+  const { userPoint, targetPoint, baselinePoint, compact = false, speakerMode = false, onClick } = props;
 
   return (
-    <div className={`spatial-arena2d${compact ? " spatial-arena2d-compact" : ""}${onClick ? "" : " spatial-static-view"}`} onClick={onClick}>
+    <div
+      className={`spatial-arena2d${compact ? " spatial-arena2d-compact" : ""}${speakerMode ? " spatial-arena2d-speaker" : ""}${onClick ? "" : " spatial-static-view"}`}
+      onClick={onClick}
+    >
+      {speakerMode && <div className="speaker-upper-mask" />}
+      {speakerMode && <div className="speaker-divider" />}
       <div className="spatial-self-2d" />
       {targetPoint && <div className="spatial-dot spatial-target" style={arenaPointToPercent(targetPoint)} />}
       {userPoint && <div className="spatial-dot spatial-user" style={arenaPointToPercent(userPoint)} />}
       {baselinePoint && <div className="spatial-dot spatial-baseline" style={arenaPointToPercent(baselinePoint)} />}
+      {speakerMode && <div className="speaker-mode-tag">音响模式: 仅第3/4象限</div>}
     </div>
   );
 }
@@ -79,16 +86,23 @@ export function SpatialStage(props: SpatialStageProps) {
     spatialIndex,
     spatialGuess,
     spatialMode,
+    speakerMode2d,
+    selectedTimbreId,
     baselinePoint,
     baselineRunning,
     currentSpatialTrial,
     completedSpatialTrials,
     spatialAverageScore,
+    canGoPrevious,
     setSpatialGuess,
+    setSelectedTimbreId,
+    setSpeakerMode2d,
     startAnswering,
     playSpatialCue,
     playBaselineSweep,
+    selectAndReplayBaselinePoint,
     submitSpatialGuess,
+    goToPreviousTrial,
     resetSpatialGuess
   } = spatial;
 
@@ -96,37 +110,56 @@ export function SpatialStage(props: SpatialStageProps) {
   const isPretest = phase === "pretest";
   const isCompleted = phase === "completed";
 
-  function handleSpatialPlaneClick(event: React.MouseEvent<HTMLDivElement>, plane: SpatialPlane) {
-    if (!isTesting || !currentSpatialTrial) {
-      return;
-    }
+  function makePointFromPlaneClick(event: React.MouseEvent<HTMLDivElement>, plane: SpatialPlane, source: SpatialPoint | null): SpatialPoint {
     const rect = event.currentTarget.getBoundingClientRect();
     const px = (event.clientX - rect.left) / rect.width;
     const py = (event.clientY - rect.top) / rect.height;
     const horizontal = clamp01ToSigned(px * 2 - 1);
     const vertical = clamp01ToSigned((1 - py) * 2 - 1);
-    setSpatialGuess((old) => {
-      const base = old ?? { x: 0, y: 0, z: 0 };
-      if (plane === "xy") {
-        return { ...base, x: horizontal, y: vertical };
-      }
-      if (plane === "xz") {
-        return { ...base, x: horizontal, z: vertical };
-      }
-      return { ...base, z: horizontal, y: vertical };
-    });
+    const base = source ?? { x: 0, y: 0, z: 0 };
+    if (plane === "xy") {
+      return { ...base, x: horizontal, y: vertical };
+    }
+    if (plane === "xz") {
+      return { ...base, x: horizontal, z: vertical };
+    }
+    return { ...base, z: horizontal, y: vertical };
   }
 
-  function handleSpatialArena2DClick(event: React.MouseEvent<HTMLDivElement>) {
+  function handleSpatialPlaneClick(event: React.MouseEvent<HTMLDivElement>, plane: SpatialPlane) {
     if (!isTesting || !currentSpatialTrial) {
       return;
     }
+    const next = makePointFromPlaneClick(event, plane, spatialGuess);
+    setSpatialGuess(next);
+  }
+
+  function handlePretestPlaneReplayClick(event: React.MouseEvent<HTMLDivElement>, plane: SpatialPlane) {
+    if (!isPretest || baselineRunning) {
+      return;
+    }
+    const next = makePointFromPlaneClick(event, plane, baselinePoint);
+    selectAndReplayBaselinePoint(next);
+  }
+
+  function handleSpatialArena2DClick(event: React.MouseEvent<HTMLDivElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     const px = (event.clientX - rect.left) / rect.width;
     const py = (event.clientY - rect.top) / rect.height;
     const x = clamp01ToSigned(px * 2 - 1);
-    const y = clamp01ToSigned((1 - py) * 2 - 1);
-    setSpatialGuess(() => ({ x, y, z: 0 }));
+    let y = clamp01ToSigned((1 - py) * 2 - 1);
+    if (speakerMode2d) {
+      y = Math.min(0, y);
+    }
+
+    if (isTesting && currentSpatialTrial) {
+      setSpatialGuess(() => ({ x, y, z: 0 }));
+      return;
+    }
+
+    if (isPretest && !baselineRunning) {
+      selectAndReplayBaselinePoint({ x, y, z: 0 });
+    }
   }
 
   return (
@@ -139,27 +172,52 @@ export function SpatialStage(props: SpatialStageProps) {
 
         {isPretest && (
           <>
-            <p>基准音已前置到测试开始前。你可以反复播放基准音，准备好后点击“开始测试”。</p>
+            <label>
+              基准音色（1-8）
+              <select
+                value={selectedTimbreId}
+                disabled={busy || baselineRunning}
+                onChange={(e) => setSelectedTimbreId(Number.parseInt(e.target.value, 10))}
+              >
+                {Array.from({ length: 8 }, (_, idx) => (
+                  <option key={`timbre-${idx}`} value={idx}>
+                    音色 #{idx + 1}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {spatialMode === "2d" && (
+              <label className="toggle-label">
+                <input
+                  type="checkbox"
+                  checked={speakerMode2d}
+                  disabled={busy || baselineRunning}
+                  onChange={(e) => setSpeakerMode2d(e.target.checked)}
+                />
+                音响模式（仅第3/4象限，y≤0）
+              </label>
+            )}
+
+            <p>基准音已前置到测试开始前。你可以反复播放整轮基准音，或点击图中任意位置立即重播该点基准音（连放2次）。</p>
             <div className="row">
               <button disabled={busy || baselineRunning} onClick={playBaselineSweep}>
-                {baselineRunning ? "基准音播放中..." : "播放基准音"}
+                {baselineRunning ? "基准音播放中..." : "播放基准音（9点单轮）"}
               </button>
               <button disabled={busy || baselineRunning || spatialTrials.length === 0} onClick={startAnswering}>
                 开始测试
               </button>
             </div>
             {baselinePoint && <p className="hint">基准点: {formatPoint(baselinePoint)}</p>}
-            <p className="hint">
-              {baselineRunning ? "橙点=当前基准音正在播放的位置。" : "点击“播放基准音”后将显示对应空间位置示意。"}
-            </p>
+            <p className="hint">{baselineRunning ? "橙点=当前基准音正在播放的位置。" : "可直接点击图中任意点立即重播该点基准音。"}</p>
             {spatialMode === "3d" ? (
               <div className="plane-layout plane-layout-compact">
-                <PlaneFigure compact title="XY 正视图" plane="xy" baselinePoint={baselinePoint ?? undefined} />
-                <PlaneFigure compact title="XZ 俯视图" plane="xz" baselinePoint={baselinePoint ?? undefined} />
-                <PlaneFigure compact title="ZY 侧视图" plane="zy" baselinePoint={baselinePoint ?? undefined} />
+                <PlaneFigure compact title="XY 正视图" plane="xy" baselinePoint={baselinePoint ?? undefined} onClick={(e) => handlePretestPlaneReplayClick(e, "xy")} />
+                <PlaneFigure compact title="XZ 俯视图" plane="xz" baselinePoint={baselinePoint ?? undefined} onClick={(e) => handlePretestPlaneReplayClick(e, "xz")} />
+                <PlaneFigure compact title="ZY 侧视图" plane="zy" baselinePoint={baselinePoint ?? undefined} onClick={(e) => handlePretestPlaneReplayClick(e, "zy")} />
               </div>
             ) : (
-              <ArenaFigure compact baselinePoint={baselinePoint ?? undefined} />
+              <ArenaFigure compact baselinePoint={baselinePoint ?? undefined} speakerMode={speakerMode2d} onClick={handleSpatialArena2DClick} />
             )}
           </>
         )}
@@ -173,6 +231,9 @@ export function SpatialStage(props: SpatialStageProps) {
             <div className="row">
               <button disabled={busy || baselineRunning} onClick={playSpatialCue}>
                 播放提示音
+              </button>
+              <button disabled={busy || !canGoPrevious || baselineRunning} onClick={goToPreviousTrial}>
+                返回上一题
               </button>
             </div>
             <label>
@@ -198,7 +259,8 @@ export function SpatialStage(props: SpatialStageProps) {
                 step={spatialMode === "2d" ? 0.005 : 0.01}
                 value={spatialGuess?.y ?? 0}
                 onChange={(e) => {
-                  const y = Number.parseFloat(e.target.value);
+                  const next = Number.parseFloat(e.target.value);
+                  const y = speakerMode2d ? Math.min(0, next) : next;
                   setSpatialGuess((old) => ({ x: old?.x ?? 0, y, z: old?.z ?? 0 }));
                 }}
               />
@@ -241,24 +303,9 @@ export function SpatialStage(props: SpatialStageProps) {
           <div className="card">
             <h2>直角坐标空间（三视图）</h2>
             <div className="plane-layout">
-              <PlaneFigure
-                title="XY 正视图"
-                plane="xy"
-                userPoint={spatialGuess ?? undefined}
-                onClick={(e) => handleSpatialPlaneClick(e, "xy")}
-              />
-              <PlaneFigure
-                title="XZ 俯视图"
-                plane="xz"
-                userPoint={spatialGuess ?? undefined}
-                onClick={(e) => handleSpatialPlaneClick(e, "xz")}
-              />
-              <PlaneFigure
-                title="ZY 侧视图"
-                plane="zy"
-                userPoint={spatialGuess ?? undefined}
-                onClick={(e) => handleSpatialPlaneClick(e, "zy")}
-              />
+              <PlaneFigure title="XY 正视图" plane="xy" userPoint={spatialGuess ?? undefined} onClick={(e) => handleSpatialPlaneClick(e, "xy")} />
+              <PlaneFigure title="XZ 俯视图" plane="xz" userPoint={spatialGuess ?? undefined} onClick={(e) => handleSpatialPlaneClick(e, "xz")} />
+              <PlaneFigure title="ZY 侧视图" plane="zy" userPoint={spatialGuess ?? undefined} onClick={(e) => handleSpatialPlaneClick(e, "zy")} />
             </div>
             <p className="hint">蓝点=你的选择。</p>
             <div className="submit-row">
@@ -269,8 +316,8 @@ export function SpatialStage(props: SpatialStageProps) {
           </div>
         ) : (
           <div className="card">
-            <h2>2D 空间区域</h2>
-            <ArenaFigure userPoint={spatialGuess ?? undefined} onClick={handleSpatialArena2DClick} />
+            <h2>2D 空间区域{speakerMode2d ? "（音响模式）" : ""}</h2>
+            <ArenaFigure userPoint={spatialGuess ?? undefined} speakerMode={speakerMode2d} onClick={handleSpatialArena2DClick} />
             <p className="hint">蓝点=你的选择，中心点=你所在位置。</p>
             <div className="submit-row">
               <button disabled={busy || !spatialGuess || baselineRunning} onClick={submitSpatialGuess}>
@@ -320,7 +367,7 @@ export function SpatialStage(props: SpatialStageProps) {
                         <PlaneFigure compact title="ZY 侧视图" plane="zy" targetPoint={trial.target} userPoint={trial.user} />
                       </div>
                     ) : (
-                      <ArenaFigure compact targetPoint={trial.target} userPoint={trial.user} />
+                      <ArenaFigure compact targetPoint={trial.target} userPoint={trial.user} speakerMode={speakerMode2d} />
                     )}
                   </div>
                 ))}
