@@ -224,8 +224,8 @@ function normalizeDepth(mode: SpatialMode, z: number): number {
 
 function spatialPannerPosition(mode: SpatialMode, point: SpatialPoint): { x: number; y: number; z: number } {
   const normalizedDepth = normalizeDepth(mode, point.z);
-  const xScale = mode === "2d" ? 2.5 : 1.7;
-  const yScale = mode === "2d" ? 2.2 : 1.3;
+  const xScale = mode === "2d" ? 1.2 : 1.7;
+  const yScale = mode === "2d" ? 1.0 : 1.3;
   return {
     x: point.x * xScale,
     y: point.y * yScale,
@@ -265,9 +265,9 @@ function planarLoudness(mode: SpatialMode, point: SpatialPoint): number {
   const depth = normalizeDepth(mode, point.z);
   const normalizationBase = mode === "2d" ? Math.sqrt(2) : Math.sqrt(3);
   const normalizedDistance = Math.min(1, Math.hypot(point.x, point.y, depth) / normalizationBase);
-  const maxGain = mode === "2d" ? 0.46 : 0.34;
-  const minGain = mode === "2d" ? 0.015 : 0.08;
-  const falloff = Math.pow(normalizedDistance, mode === "2d" ? 1.25 : 0.7);
+  const maxGain = mode === "2d" ? 0.55 : 0.34;
+  const minGain = mode === "2d" ? 0.12 : 0.08;
+  const falloff = Math.pow(normalizedDistance, mode === "2d" ? 0.9 : 0.7);
   return maxGain - (maxGain - minGain) * falloff;
 }
 

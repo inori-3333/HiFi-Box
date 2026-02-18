@@ -14,7 +14,7 @@ import type { SpatialMode, SpatialPoint, SpatialSceneProfile, SpatialTrial } fro
 
 const BASELINE_POSITION_CYCLES = 1;
 const BASELINE_AUTOPLAY_DELAY_MS = 1000;
-const BASELINE_INTER_TONE_GAP_SEC = 0.6;
+const BASELINE_INTER_TONE_GAP_SEC = 0.3;
 const BASELINE_REPEAT_COUNT_PER_TONE = 2;
 
 export type SpatialTestPhase = "pretest" | "testing" | "completed";
