@@ -71,8 +71,11 @@ function clampScore(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function scoreFromError(error: number, maxError: number): number {
-  return clampScore(100 - (error / Math.max(maxError, 1e-9)) * 100);
+function scoreFromError(error: number, maxError: number, toleranceRatio: number, steepness: number): number {
+  const normalizedError = error / Math.max(maxError, 1e-9);
+  const raw = 1 / (1 + Math.exp(steepness * (normalizedError - toleranceRatio)));
+  const zeroErrorRaw = 1 / (1 + Math.exp(-steepness * toleranceRatio));
+  return clampScore((raw / Math.max(zeroErrorRaw, 1e-9)) * 100);
 }
 
 function angleDelta(a: number, b: number): number {
@@ -159,27 +162,28 @@ export function computeSpatialBreakdown(
   const dy = guess.y - target.y;
   const dz = guess.z - target.z;
   const cartesianError = mode === "2d" ? Math.hypot(dx, dy) : Math.hypot(dx, dy, dz);
-  const cartesianScore = scoreFromError(cartesianError, mode === "2d" ? MAX_PLANE_DISTANCE : MAX_CART_DISTANCE);
+  const cartesianScore = scoreFromError(cartesianError, mode === "2d" ? MAX_PLANE_DISTANCE : MAX_CART_DISTANCE, 0.19, 24);
 
   const targetAzimuth = mode === "2d" ? Math.atan2(target.y, target.x) : Math.atan2(target.z, target.x);
   const guessAzimuth = mode === "2d" ? Math.atan2(guess.y, guess.x) : Math.atan2(guess.z, guess.x);
-  const azimuthScore = scoreFromError(angleDelta(targetAzimuth, guessAzimuth), Math.PI);
+  const azimuthScore = scoreFromError(angleDelta(targetAzimuth, guessAzimuth), Math.PI, 0.13, 24);
 
-  const verticalScore = scoreFromError(Math.abs(dy), 2);
+  const verticalScore = scoreFromError(Math.abs(dy), 2, 0.15, 22);
 
   const radialError = Math.abs(pointRadius(mode, target) - pointRadius(mode, guess));
-  const distanceScore = scoreFromError(radialError, mode === "2d" ? MAX_RADIUS_2D : MAX_RADIUS_3D);
+  const distanceScore = scoreFromError(radialError, mode === "2d" ? MAX_RADIUS_2D : MAX_RADIUS_3D, 0.15, 22);
 
   const weights =
     mode === "2d"
-      ? { cartesian: 0.4, azimuth: 0.3, vertical: 0.2, distance: 0.1 }
-      : { cartesian: 0.35, azimuth: 0.3, vertical: 0.2, distance: 0.15 };
-  const score = clampScore(
+      ? { cartesian: 0.47, azimuth: 0.28, vertical: 0.23, distance: 0.02 }
+      : { cartesian: 0.45, azimuth: 0.25, vertical: 0.25, distance: 0.05 };
+  const weightedBlend =
     cartesianScore * weights.cartesian +
       azimuthScore * weights.azimuth +
       verticalScore * weights.vertical +
-      distanceScore * weights.distance
-  );
+      distanceScore * weights.distance;
+  const cartesianGate = Math.pow(cartesianScore / 100, 2);
+  const score = clampScore(weightedBlend * cartesianGate);
 
   return {
     score,

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
-  SPATIAL_BASELINE_POINT_GAP_SEC,
   SPATIAL_CUE_TIMBRE_COUNT,
   SPATIAL_SCHEDULE_LEAD_SEC,
   SPATIAL_TRIAL_COUNT,
@@ -9,13 +8,18 @@ import {
   computeSpatialBreakdown,
   generateSpatialTargets,
   playSpatialCueAtPoint,
-  playSpatialMotifAtPoint,
   resolveSpatialSeed
 } from "./spatial-core";
 import type { SpatialMode, SpatialPoint, SpatialTrial } from "./spatial-core";
 
-const SPATIAL_NOTE_INTERVALS = [0, 4, 7, 12, 7, 4];
-const SPATIAL_NOTE_DURATION_SEC = 0.11;
+const BASELINE_ROUNDS = 2;
+const BASELINE_TONES_PER_ROUND = SPATIAL_CUE_TIMBRE_COUNT;
+const BASELINE_TOTAL_TONES = 18;
+const BASELINE_POSITION_CYCLES = 2;
+const BASELINE_TIMBRE_SHUFFLE_RETRY_LIMIT = 24;
+const BASELINE_AUTOPLAY_DELAY_MS = 1000;
+const BASELINE_INTER_TONE_GAP_SEC = 0.6;
+const BASELINE_REPEAT_COUNT_PER_TONE = 2;
 
 export type SpatialTestPhase = "pretest" | "testing" | "completed";
 
@@ -56,6 +60,48 @@ export type SpatialTestController = {
   resetSpatialGuess: () => void;
 };
 
+function shuffleTimbres(values: number[]): number[] {
+  const shuffled = values.slice();
+  for (let idx = shuffled.length - 1; idx > 0; idx -= 1) {
+    const swapIdx = Math.floor(Math.random() * (idx + 1));
+    [shuffled[idx], shuffled[swapIdx]] = [shuffled[swapIdx], shuffled[idx]];
+  }
+  return shuffled;
+}
+
+function hasAdjacentDuplicate(values: number[]): boolean {
+  for (let idx = 1; idx < values.length; idx += 1) {
+    if (values[idx] === values[idx - 1]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function createBaselineTimbreSequence(): number[] {
+  const base = Array.from({ length: BASELINE_ROUNDS }, () =>
+    Array.from({ length: BASELINE_TONES_PER_ROUND }, (_, timbreId) => timbreId)
+  ).flat();
+  const extraPool = Array.from({ length: BASELINE_TONES_PER_ROUND }, (_, timbreId) => timbreId);
+  const extra = shuffleTimbres(extraPool).slice(0, 2);
+  const sequence = base.concat(extra);
+
+  let fallback = shuffleTimbres(sequence);
+  if (!hasAdjacentDuplicate(fallback)) {
+    return fallback;
+  }
+
+  for (let attempt = 0; attempt < BASELINE_TIMBRE_SHUFFLE_RETRY_LIMIT; attempt += 1) {
+    const shuffled = shuffleTimbres(sequence);
+    if (!hasAdjacentDuplicate(shuffled)) {
+      return shuffled;
+    }
+    fallback = shuffled;
+  }
+
+  return fallback;
+}
+
 export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestController {
   const { isSpatialStage, onEnterSpatialStage, setStatus } = options;
   const [phase, setPhase] = useState<SpatialTestPhase>("pretest");
@@ -70,6 +116,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
   const [pretestBaselinePlayed, setPretestBaselinePlayed] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const baselineStopRef = useRef<(() => void) | null>(null);
+  const pretestAutoplayTimeoutRef = useRef<number | null>(null);
   const cueStopRef = useRef<(() => void) | null>(null);
   const cueStopTimeoutRef = useRef<number | null>(null);
 
@@ -127,6 +174,10 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
   }
 
   function stopBaselineSweep() {
+    if (pretestAutoplayTimeoutRef.current !== null) {
+      window.clearTimeout(pretestAutoplayTimeoutRef.current);
+      pretestAutoplayTimeoutRef.current = null;
+    }
     if (baselineStopRef.current) {
       baselineStopRef.current();
       baselineStopRef.current = null;
@@ -221,7 +272,8 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     }
 
     const points = baselineReferencePoints(spatialMode);
-    const pointSlotSec = SPATIAL_NOTE_INTERVALS.length * SPATIAL_NOTE_DURATION_SEC + SPATIAL_BASELINE_POINT_GAP_SEC;
+    const baselineToneCount = points.length * BASELINE_POSITION_CYCLES;
+    const timbreSequence = createBaselineTimbreSequence();
     const timeoutIds: number[] = [];
     const activeStops: Array<(at: number) => void> = [];
     const sequenceStartAt = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
@@ -234,16 +286,20 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       activeStops.forEach((stop) => stop(stopAt));
     };
 
-    setStatus(`正在播放基准音：依次播报 ${points.length} 个参考点...`);
+    setStatus(
+      `正在播放基准音：${BASELINE_TOTAL_TONES} 个基准音（每个连放 ${BASELINE_REPEAT_COUNT_PER_TONE} 次，组间隔 ${BASELINE_INTER_TONE_GAP_SEC.toFixed(1)}s）...`
+    );
 
     let sequenceEndAt = sequenceStartAt;
-    points.forEach((point, idx) => {
-      const pointStartAt = sequenceStartAt + idx * pointSlotSec;
-      const playback = playSpatialMotifAtPoint(ctx, spatialMode, point, pointStartAt);
-      activeStops.push(playback.stop);
-      sequenceEndAt = Math.max(sequenceEndAt, playback.endAt);
+    let toneStartAt = sequenceStartAt;
+    for (let idx = 0; idx < baselineToneCount; idx += 1) {
+      const timbreId = timbreSequence[idx % timbreSequence.length];
+      const point = points[idx % points.length];
+      const firstPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, toneStartAt, timbreId);
+      activeStops.push(firstPlayback.stop);
+      sequenceEndAt = Math.max(sequenceEndAt, firstPlayback.endAt);
 
-      const visualDelayMs = Math.max(0, Math.round((pointStartAt - ctx.currentTime) * 1000));
+      const visualDelayMs = Math.max(0, Math.round((toneStartAt - ctx.currentTime) * 1000));
       const timeoutId = window.setTimeout(() => {
         if (cancelled) {
           return;
@@ -251,7 +307,17 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
         setBaselinePoint(point);
       }, visualDelayMs);
       timeoutIds.push(timeoutId);
-    });
+
+      let repeatEndAt = firstPlayback.endAt;
+      for (let repeatIdx = 1; repeatIdx < BASELINE_REPEAT_COUNT_PER_TONE; repeatIdx += 1) {
+        const repeatPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, repeatEndAt, timbreId);
+        activeStops.push(repeatPlayback.stop);
+        repeatEndAt = repeatPlayback.endAt;
+        sequenceEndAt = Math.max(sequenceEndAt, repeatPlayback.endAt);
+      }
+
+      toneStartAt = repeatEndAt + BASELINE_INTER_TONE_GAP_SEC;
+    }
 
     const totalMs = Math.max(0, Math.round((sequenceEndAt - ctx.currentTime) * 1000));
     const finishTimeout = window.setTimeout(() => {
@@ -334,7 +400,16 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       return;
     }
     setPretestBaselinePlayed(true);
-    void playBaselineSweep();
+    pretestAutoplayTimeoutRef.current = window.setTimeout(() => {
+      pretestAutoplayTimeoutRef.current = null;
+      void playBaselineSweep();
+    }, BASELINE_AUTOPLAY_DELAY_MS);
+    return () => {
+      if (pretestAutoplayTimeoutRef.current !== null) {
+        window.clearTimeout(pretestAutoplayTimeoutRef.current);
+        pretestAutoplayTimeoutRef.current = null;
+      }
+    };
   }, [isSpatialStage, phase, pretestBaselinePlayed, spatialMode, spatialTrials]);
 
   useEffect(() => {
