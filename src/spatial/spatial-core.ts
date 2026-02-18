@@ -107,10 +107,10 @@ function pointDistance(mode: SpatialMode, a: SpatialPoint, b: SpatialPoint): num
 
 function createRandomPoint(mode: SpatialMode, random: () => number, profile: SpatialSceneProfile): SpatialPoint {
   if (mode === "2d") {
-    const yMax = profile === "speaker2d" ? 0.0 : 1.0;
+    const yMin = profile === "speaker2d" ? 0.0 : -1.0;
     return {
       x: randomInRange(random, -1.0, 1.0),
-      y: randomInRange(random, -1.0, yMax),
+      y: randomInRange(random, yMin, 1.0),
       z: 0
     };
   }
@@ -240,12 +240,12 @@ export function baselineReferencePoints(mode: SpatialMode, profile: SpatialScene
       { x: 0, y: 0, z },
       { x: 0.9, y: 0, z },
       { x: -0.9, y: 0, z },
-      { x: 0, y: -0.9, z },
-      { x: 0.55, y: -0.55, z },
-      { x: -0.55, y: -0.55, z },
-      { x: 0.25, y: -0.75, z },
-      { x: -0.25, y: -0.75, z },
-      { x: 0, y: -0.45, z }
+      { x: 0, y: 0.9, z },
+      { x: 0.55, y: 0.55, z },
+      { x: -0.55, y: 0.55, z },
+      { x: 0.25, y: 0.75, z },
+      { x: -0.25, y: 0.75, z },
+      { x: 0, y: 0.45, z }
     ];
   }
   return [

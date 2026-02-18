@@ -215,7 +215,7 @@ td {
 
 .speaker-upper-mask {
   position: absolute;
-  inset: 0 0 50% 0;
+  inset: 50% 0 0 0;
   background: rgba(90, 112, 85, 0.18);
   pointer-events: none;
 }

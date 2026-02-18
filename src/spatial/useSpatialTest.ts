@@ -78,7 +78,7 @@ function resolveSceneProfile(mode: SpatialMode, speakerMode2d: boolean): Spatial
 
 function defaultGuess(mode: SpatialMode, speakerMode2d: boolean): SpatialPoint {
   if (mode === "2d" && speakerMode2d) {
-    return { x: 0, y: -0.5, z: 0 };
+    return { x: 0, y: 0.5, z: 0 };
   }
   return { x: 0, y: 0, z: 0 };
 }
@@ -446,7 +446,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       return;
     }
 
-    const guess = spatialMode === "2d" && speakerMode2d ? { ...spatialGuess, y: Math.min(0, spatialGuess.y), z: 0 } : spatialGuess;
+    const guess = spatialMode === "2d" && speakerMode2d ? { ...spatialGuess, y: Math.max(0, spatialGuess.y), z: 0 } : spatialGuess;
     const result = computeSpatialBreakdown(spatialMode, currentSpatialTrial.target, guess);
     const finishedTrialId = currentSpatialTrial.id;
     const nextTrials = spatialTrials.map((item, idx) =>

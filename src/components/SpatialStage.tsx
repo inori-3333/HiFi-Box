@@ -73,7 +73,7 @@ function ArenaFigure(props: ArenaFigureProps) {
       {targetPoint && <div className="spatial-dot spatial-target" style={arenaPointToPercent(targetPoint)} />}
       {userPoint && <div className="spatial-dot spatial-user" style={arenaPointToPercent(userPoint)} />}
       {baselinePoint && <div className="spatial-dot spatial-baseline" style={arenaPointToPercent(baselinePoint)} />}
-      {speakerMode && <div className="speaker-mode-tag">音响模式: 仅第3/4象限</div>}
+      {speakerMode && <div className="speaker-mode-tag">音响模式: 仅第1/2象限</div>}
     </div>
   );
 }
@@ -149,7 +149,7 @@ export function SpatialStage(props: SpatialStageProps) {
     const x = clamp01ToSigned(px * 2 - 1);
     let y = clamp01ToSigned((1 - py) * 2 - 1);
     if (speakerMode2d) {
-      y = Math.min(0, y);
+      y = Math.max(0, y);
     }
 
     if (isTesting && currentSpatialTrial) {
@@ -195,7 +195,7 @@ export function SpatialStage(props: SpatialStageProps) {
                   disabled={busy || baselineRunning}
                   onChange={(e) => setSpeakerMode2d(e.target.checked)}
                 />
-                音响模式（仅第3/4象限，y≤0）
+                音响模式（仅第1/2象限，y≥0）
               </label>
             )}
 
@@ -260,7 +260,7 @@ export function SpatialStage(props: SpatialStageProps) {
                 value={spatialGuess?.y ?? 0}
                 onChange={(e) => {
                   const next = Number.parseFloat(e.target.value);
-                  const y = speakerMode2d ? Math.min(0, next) : next;
+                  const y = speakerMode2d ? Math.max(0, next) : next;
                   setSpatialGuess((old) => ({ x: old?.x ?? 0, y, z: old?.z ?? 0 }));
                 }}
               />
