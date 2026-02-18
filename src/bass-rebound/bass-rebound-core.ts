@@ -3,8 +3,8 @@
  * 使用Web Audio API合成Kick鼓声音
  */
 
-const BPM_START = 60;
-const BPM_END = 180;
+const BPM_START = 80;
+const BPM_END = 260;
 const TEST_DURATION_SEC = 40;
 const LOOKAHEAD_SEC = 0.05;
 

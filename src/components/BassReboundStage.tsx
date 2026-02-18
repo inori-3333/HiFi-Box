@@ -55,10 +55,10 @@ export function BassReboundStage(props: BassReboundStageProps) {
   // 获取回弹评价
   function getReboundAssessment(bpm: number | null): string {
     if (bpm === null) return "";
-    if (bpm >= 160) return "优秀 - 低频响应非常快";
-    if (bpm >= 140) return "良好 - 低频响应较快";
-    if (bpm >= 120) return "一般 - 低频响应中等";
-    if (bpm >= 100) return "较差 - 低频偏慢";
+    if (bpm >= 220) return "优秀 - 低频响应非常快";
+    if (bpm >= 190) return "良好 - 低频响应较快";
+    if (bpm >= 160) return "一般 - 低频响应中等";
+    if (bpm >= 130) return "较差 - 低频偏慢";
     return "很差 - 低频响应慢";
   }
 
@@ -67,7 +67,7 @@ export function BassReboundStage(props: BassReboundStageProps) {
       <div className="card bass-rebound-card">
         <h2>低频回弹测试</h2>
         <p>
-          测试耳机/音箱的低频瞬态响应能力。鼓点节奏会逐渐加快（60BPM → 180BPM），
+          测试耳机/音箱的低频瞬态响应能力。鼓点节奏会逐渐加快（80BPM → 260BPM），
           当您感觉低音开始"糊成一团"、无法分辨单个鼓点时，点击"标记极限"。
         </p>
 
