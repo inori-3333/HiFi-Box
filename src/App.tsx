@@ -9,6 +9,7 @@ import {
   Tooltip
 } from "recharts";
 import { api } from "./api";
+import { HearingSweepStage } from "./components/HearingSweepStage";
 import { SpatialStage } from "./components/SpatialStage";
 import { useSpatialTest } from "./spatial/useSpatialTest";
 import type {
@@ -27,7 +28,7 @@ const SAMPLE_RATE = 48_000;
 const APP_VERSION = "0.1.0";
 const IS_TAURI_RUNTIME = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-type Stage = "home" | "wizard" | "result" | "spatial";
+type Stage = "home" | "wizard" | "result" | "spatial" | "hearing-sweep";
 
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
@@ -285,6 +286,15 @@ export default function App() {
               <button disabled={busy} onClick={() => spatial.startSpatialTest("3d")}>
                 空间结像测试(3D)
               </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setStage("hearing-sweep");
+                  setStatus("进入扫频可听范围测试");
+                }}
+              >
+                扫频可听范围测试
+              </button>
               {!isWebDemo && (
                 <button disabled={busy} onClick={refreshHistory}>
                   刷新历史
@@ -316,6 +326,10 @@ export default function App() {
 
       {stage === "spatial" && spatial.spatialTrials.length > 0 && (
         <SpatialStage busy={busy} spatial={spatial} onBackHome={() => setStage("home")} />
+      )}
+
+      {stage === "hearing-sweep" && (
+        <HearingSweepStage busy={busy} setStatus={setStatus} onBackHome={() => setStage("home")} />
       )}
 
       {stage === "wizard" && (
