@@ -135,11 +135,20 @@ td {
   gap: 12px;
 }
 
+.plane-layout-compact {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
 .plane-wrap {
   background: #f3fbef;
   border: 1px solid #caded4;
   border-radius: 10px;
   padding: 8px;
+}
+
+.plane-wrap-compact {
+  padding: 6px;
 }
 
 .plane-title {
@@ -159,6 +168,10 @@ td {
   background-size: 20% 20%;
   background-color: #f8fff5;
   cursor: crosshair;
+}
+
+.spatial-static-view {
+  cursor: default;
 }
 
 .plane-axis-x {
@@ -189,6 +202,10 @@ td {
   background: radial-gradient(circle at 50% 45%, #f4fff1 0%, #d8ead0 70%, #c4ddbc 100%);
   overflow: hidden;
   cursor: crosshair;
+}
+
+.spatial-arena2d-compact {
+  max-width: 220px;
 }
 
 .spatial-self-2d {
@@ -232,6 +249,33 @@ td {
   margin-top: 10px;
   display: flex;
   justify-content: flex-end;
+}
+
+.spatial-result-table {
+  margin-top: 10px;
+}
+
+.spatial-result-table td,
+.spatial-result-table th {
+  font-size: 13px;
+  vertical-align: top;
+}
+
+.result-visuals {
+  margin-top: 14px;
+}
+
+.result-trial-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.result-trial-card {
+  background: #f4fbee;
+  border: 1px solid #caded4;
+  border-radius: 10px;
+  padding: 8px;
 }
 
 .statusbar {

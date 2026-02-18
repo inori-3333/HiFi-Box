@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   SPATIAL_BASELINE_POINT_GAP_SEC,
+  SPATIAL_CUE_TIMBRE_COUNT,
   SPATIAL_SCHEDULE_LEAD_SEC,
   SPATIAL_TRIAL_COUNT,
   baselineReferencePoints,
   computeSpatialBreakdown,
   generateSpatialTargets,
+  playSpatialCueAtPoint,
   playSpatialMotifAtPoint,
   resolveSpatialSeed
 } from "./spatial-core";
@@ -14,6 +16,8 @@ import type { SpatialMode, SpatialPoint, SpatialTrial } from "./spatial-core";
 
 const SPATIAL_NOTE_INTERVALS = [0, 4, 7, 12, 7, 4];
 const SPATIAL_NOTE_DURATION_SEC = 0.11;
+
+export type SpatialTestPhase = "pretest" | "testing" | "completed";
 
 type UseSpatialTestOptions = {
   isSpatialStage: boolean;
@@ -29,6 +33,7 @@ type SpatialAverageBreakdown = {
 };
 
 export type SpatialTestController = {
+  phase: SpatialTestPhase;
   spatialTrials: SpatialTrial[];
   spatialIndex: number;
   spatialGuess: SpatialPoint | null;
@@ -38,22 +43,22 @@ export type SpatialTestController = {
   baselinePoint: SpatialPoint | null;
   baselineRunning: boolean;
   currentSpatialTrial: SpatialTrial | undefined;
-  currentSpatialRevealed: boolean;
   completedSpatialTrials: SpatialTrial[];
   spatialAverageScore: number;
   spatialAverageBreakdown: SpatialAverageBreakdown | null;
   setSpatialSeedInput: (value: string) => void;
   setSpatialGuess: Dispatch<SetStateAction<SpatialPoint | null>>;
   startSpatialTest: (mode: SpatialMode) => void;
+  startAnswering: () => void;
   playSpatialCue: () => Promise<void>;
   playBaselineSweep: () => Promise<void>;
   submitSpatialGuess: () => void;
-  gotoNextSpatialTrial: () => void;
   resetSpatialGuess: () => void;
 };
 
 export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestController {
   const { isSpatialStage, onEnterSpatialStage, setStatus } = options;
+  const [phase, setPhase] = useState<SpatialTestPhase>("pretest");
   const [spatialTrials, setSpatialTrials] = useState<SpatialTrial[]>([]);
   const [spatialIndex, setSpatialIndex] = useState(0);
   const [spatialGuess, setSpatialGuess] = useState<SpatialPoint | null>(null);
@@ -62,14 +67,15 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
   const [spatialSeed, setSpatialSeed] = useState<number | null>(null);
   const [baselinePoint, setBaselinePoint] = useState<SpatialPoint | null>(null);
   const [baselineRunning, setBaselineRunning] = useState(false);
-  const [baselineTrialId, setBaselineTrialId] = useState<number | null>(null);
+  const [pretestBaselinePlayed, setPretestBaselinePlayed] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const baselineStopRef = useRef<(() => void) | null>(null);
+  const cueStopRef = useRef<(() => void) | null>(null);
+  const cueStopTimeoutRef = useRef<number | null>(null);
 
   const currentSpatialTrial = spatialTrials[spatialIndex];
-  const currentSpatialRevealed = currentSpatialTrial?.revealed ?? false;
   const completedSpatialTrials = useMemo(
-    () => spatialTrials.filter((trial) => trial.revealed && trial.score !== undefined),
+    () => spatialTrials.filter((trial) => trial.submitted && trial.score !== undefined),
     [spatialTrials]
   );
   const spatialAverageScore = useMemo(() => {
@@ -109,6 +115,17 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     };
   }, [completedSpatialTrials]);
 
+  function stopSpatialCue() {
+    if (cueStopTimeoutRef.current !== null) {
+      window.clearTimeout(cueStopTimeoutRef.current);
+      cueStopTimeoutRef.current = null;
+    }
+    if (cueStopRef.current) {
+      cueStopRef.current();
+      cueStopRef.current = null;
+    }
+  }
+
   function stopBaselineSweep() {
     if (baselineStopRef.current) {
       baselineStopRef.current();
@@ -124,20 +141,23 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     const trials = targets.map((target, idx) => ({
       id: idx + 1,
       target,
-      revealed: false
+      cueTimbreId: idx % SPATIAL_CUE_TIMBRE_COUNT
     }));
+
+    stopBaselineSweep();
+    stopSpatialCue();
     setSpatialSeed(seed);
     setSpatialTrials(trials);
     setSpatialIndex(0);
     setSpatialMode(mode);
     setSpatialGuess({ x: 0, y: 0, z: 0 });
-    setBaselinePoint(null);
-    setBaselineTrialId(null);
+    setPhase("pretest");
+    setPretestBaselinePlayed(false);
     onEnterSpatialStage();
     setStatus(
       mode === "2d"
-        ? `2D 空间测试已开始（seed ${seed}）：请播放提示音并在平面区域中定位`
-        : `3D 空间测试已开始（seed ${seed}）：请播放提示音并在直角坐标三视图中选择声源位置`
+        ? `2D 空间测试已开始（seed ${seed}）：先听基准音，准备好后点击“开始测试”`
+        : `3D 空间测试已开始（seed ${seed}）：先听基准音，准备好后点击“开始测试”`
     );
   }
 
@@ -148,27 +168,51 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     return audioContextRef.current;
   }
 
-  async function playSpatialCue() {
-    if (!currentSpatialTrial) {
-      return;
-    }
+  async function playTrialCue(trial: SpatialTrial): Promise<void> {
     const ctx = getAudioContext();
     if (ctx.state === "suspended") {
       await ctx.resume();
     }
+    stopSpatialCue();
 
     const start = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
-    playSpatialMotifAtPoint(ctx, spatialMode, currentSpatialTrial.target, start);
-    setStatus(`已播放第 ${currentSpatialTrial.id} 题提示音，请在空间中点击你感知的位置`);
+    const playback = playSpatialCueAtPoint(ctx, spatialMode, trial.target, start, trial.cueTimbreId);
+    const stopPlayback = () => {
+      playback.stop(ctx.currentTime);
+    };
+    cueStopRef.current = stopPlayback;
+    cueStopTimeoutRef.current = window.setTimeout(() => {
+      if (cueStopRef.current === stopPlayback) {
+        cueStopRef.current = null;
+      }
+      cueStopTimeoutRef.current = null;
+    }, Math.max(100, Math.ceil((playback.endAt - ctx.currentTime + 0.15) * 1000)));
+
+    setStatus(`已播放第 ${trial.id} 题提示音，请选择位置后提交。可重复点击“播放提示音”重听。`);
+  }
+
+  async function playSpatialCue() {
+    if (phase !== "testing") {
+      setStatus("当前不在答题阶段，只有开始测试后才可播放题目提示音");
+      return;
+    }
+    if (!currentSpatialTrial) {
+      return;
+    }
+    await playTrialCue(currentSpatialTrial);
   }
 
   async function playBaselineSweep() {
+    if (phase !== "pretest") {
+      setStatus("开始测试后不允许播放基准音");
+      return;
+    }
     if (spatialTrials.length === 0) {
       return;
     }
+
     stopBaselineSweep();
-    const trialId = spatialTrials[spatialIndex].id;
-    setBaselineTrialId(trialId);
+    stopSpatialCue();
     setBaselineRunning(true);
 
     const ctx = getAudioContext();
@@ -190,7 +234,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       activeStops.forEach((stop) => stop(stopAt));
     };
 
-    setStatus(`正在播放第 ${trialId} 题基准音：依次播报 ${points.length} 个参考点...`);
+    setStatus(`正在播放基准音：依次播报 ${points.length} 个参考点...`);
 
     let sequenceEndAt = sequenceStartAt;
     points.forEach((point, idx) => {
@@ -215,85 +259,98 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
         return;
       }
       stopBaselineSweep();
-      setStatus(`第 ${trialId} 题基准音播放完成，请开始选择位置`);
+      setStatus("基准音播放完成。可重播基准音，准备好后点击“开始测试”。");
     }, totalMs);
     timeoutIds.push(finishTimeout);
   }
 
+  function startAnswering() {
+    if (phase === "testing") {
+      setStatus("已经在答题阶段");
+      return;
+    }
+    if (phase === "completed") {
+      setStatus("本轮测试已结束，请返回首页重新开始");
+      return;
+    }
+    if (spatialTrials.length === 0 || !spatialTrials[0]) {
+      return;
+    }
+    stopBaselineSweep();
+    setSpatialIndex(0);
+    setSpatialGuess({ x: 0, y: 0, z: 0 });
+    setPhase("testing");
+    setStatus("已开始测试，正在播放第 1 题提示音...");
+    void playTrialCue(spatialTrials[0]);
+  }
+
   function submitSpatialGuess() {
+    if (phase !== "testing") {
+      setStatus("当前不在答题阶段");
+      return;
+    }
     if (!currentSpatialTrial) {
       return;
     }
-    if (currentSpatialTrial.revealed) {
-      setStatus(`第 ${currentSpatialTrial.id} 题已提交，请进入下一题`);
+    if (currentSpatialTrial.submitted) {
+      setStatus(`第 ${currentSpatialTrial.id} 题已提交`);
       return;
     }
     if (!spatialGuess) {
       setStatus(spatialMode === "2d" ? "请先在 2D 区域选择位置后再提交" : "请先在三视图中选择一个空间位置后再提交");
       return;
     }
-    const result = computeSpatialBreakdown(spatialMode, currentSpatialTrial.target, spatialGuess);
-    const scoreValue = result.score;
 
+    const result = computeSpatialBreakdown(spatialMode, currentSpatialTrial.target, spatialGuess);
+    const finishedTrialId = currentSpatialTrial.id;
     const nextTrials = spatialTrials.map((item, idx) =>
       idx === spatialIndex
-        ? { ...item, user: spatialGuess, score: scoreValue, breakdown: result.breakdown, revealed: true }
+        ? { ...item, user: spatialGuess, score: result.score, breakdown: result.breakdown, submitted: true }
         : item
     );
     setSpatialTrials(nextTrials);
-    setStatus(
-      `第 ${currentSpatialTrial.id} 题已揭晓，得分 ${scoreValue.toFixed(1)}（方位 ${result.breakdown.azimuth.toFixed(1)} / ${
-        spatialMode === "3d" ? "高度" : "纵向"
-      } ${result.breakdown.vertical.toFixed(1)} / 距离 ${result.breakdown.distance.toFixed(1)}）`
-    );
+
+    if (spatialIndex >= nextTrials.length - 1) {
+      stopSpatialCue();
+      setPhase("completed");
+      setStatus("全部题目已完成，已生成最终得分与每题坐标明细。");
+      return;
+    }
+
+    const nextIndex = spatialIndex + 1;
+    const nextTrial = nextTrials[nextIndex];
+    setSpatialIndex(nextIndex);
+    resetSpatialGuess();
+    setStatus(`第 ${finishedTrialId} 题已提交，正在播放第 ${nextTrial.id} 题提示音...`);
+    void playTrialCue(nextTrial);
   }
 
   function resetSpatialGuess() {
     setSpatialGuess({ x: 0, y: 0, z: 0 });
   }
 
-  function gotoNextSpatialTrial() {
-    if (!currentSpatialTrial?.revealed) {
-      setStatus("请先提交并揭晓当前题，再进入下一题");
-      return;
-    }
-    if (spatialIndex >= spatialTrials.length - 1) {
-      setStatus("空间测试已完成，可查看汇总分数");
-      return;
-    }
-    setSpatialIndex((v) => v + 1);
-    resetSpatialGuess();
-    setBaselinePoint(null);
-    setBaselineTrialId(null);
-    setStatus(
-      spatialMode === "2d"
-        ? `进入第 ${spatialIndex + 2} 题，请播放提示音并在 2D 区域定位`
-        : `进入第 ${spatialIndex + 2} 题，请播放提示音并在三视图中定位`
-    );
-  }
-
   useEffect(() => {
-    if (!isSpatialStage || spatialTrials.length === 0) {
+    if (!isSpatialStage || phase !== "pretest" || spatialTrials.length === 0 || pretestBaselinePlayed) {
       return;
     }
-    const currentTrialId = spatialTrials[spatialIndex].id;
-    if (baselineTrialId === currentTrialId) {
-      return;
-    }
+    setPretestBaselinePlayed(true);
     void playBaselineSweep();
-  }, [baselineTrialId, isSpatialStage, spatialIndex, spatialMode, spatialTrials]);
+  }, [isSpatialStage, phase, pretestBaselinePlayed, spatialMode, spatialTrials]);
 
   useEffect(() => {
     if (!isSpatialStage) {
       stopBaselineSweep();
+      stopSpatialCue();
       setBaselinePoint(null);
     }
     return () => {
       stopBaselineSweep();
+      stopSpatialCue();
     };
   }, [isSpatialStage]);
 
   return {
+    phase,
     spatialTrials,
     spatialIndex,
     spatialGuess,
@@ -303,17 +360,16 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     baselinePoint,
     baselineRunning,
     currentSpatialTrial,
-    currentSpatialRevealed,
     completedSpatialTrials,
     spatialAverageScore,
     spatialAverageBreakdown,
     setSpatialSeedInput,
     setSpatialGuess,
     startSpatialTest,
+    startAnswering,
     playSpatialCue,
     playBaselineSweep,
     submitSpatialGuess,
-    gotoNextSpatialTrial,
     resetSpatialGuess
   };
 }
