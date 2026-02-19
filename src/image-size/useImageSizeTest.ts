@@ -4,10 +4,13 @@ import {
   type ImageSizeSession,
   type ImageSizeTrial,
   type ImageSizeOverallResult,
+  type ImageSizeAlgorithm,
+  ALGORITHM_CONFIGS,
   computeImageSizeScore,
   generateImageSizeSession,
   computeOverallResult,
   playImageSizeTone,
+  playImageSizeToneByAlgorithm,
   REFERENCE_SIZE
 } from "./image-size-core";
 
@@ -22,9 +25,12 @@ export type ImageSizeController = {
   readonly isPlayingReference: boolean;
   readonly isPlayingTest: boolean;
   readonly overallResult: ImageSizeOverallResult | null;
+  readonly algorithm: ImageSizeAlgorithm;
+  readonly algorithmConfigs: typeof ALGORITHM_CONFIGS;
 
   // 方法
   setUserSize: (value: number) => void;
+  setAlgorithm: (algo: ImageSizeAlgorithm) => void;
   playReference: () => Promise<void>;
   startTest: () => Promise<void>;
   replayTestTone: () => Promise<void>;
@@ -50,6 +56,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
   const [isPlayingReference, setIsPlayingReference] = useState(false);
   const [isPlayingTest, setIsPlayingTest] = useState(false);
   const [overallResult, setOverallResult] = useState<ImageSizeOverallResult | null>(null);
+  const [algorithm, setAlgorithmState] = useState<ImageSizeAlgorithm>('decorrelation');
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const playbackStopRef = useRef<(() => void) | null>(null);
@@ -69,6 +76,13 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     return session.trials[session.currentTrial] || null;
   }, [session]);
 
+  // 设置算法
+  const setAlgorithm = useCallback((algo: ImageSizeAlgorithm) => {
+    setAlgorithmState(algo);
+    const algoName = ALGORITHM_CONFIGS.find(c => c.type === algo)?.name || algo;
+    setStatus(`已切换到算法: ${algoName}`);
+  }, [setStatus]);
+
   // 播放基准音
   const playReference = useCallback(async () => {
     // 如果正在播放测试音，先停止
@@ -85,12 +99,14 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
 
     setIsPlayingReference(true);
     setPhase("playing-reference");
-    setStatus("播放基准音（中等大小）...");
+    const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
+    setStatus(`播放基准音（${algoName}）...`);
 
-    // 播放基准音
-    const { stop } = playImageSizeTone(
+    // 播放基准音（使用当前选择的算法）
+    const { stop } = playImageSizeToneByAlgorithm(
       ctx,
       REFERENCE_SIZE,
+      algorithm,
       1.5,
       () => {
         setIsPlayingReference(false);
@@ -135,12 +151,14 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
 
     setIsPlayingTest(true);
     setPhase("playing-test");
-    setStatus(`第 1/${TOTAL_TRIALS} 题：播放测试音，请调整滑杆匹配结像大小`);
+    const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
+    setStatus(`第 1/${TOTAL_TRIALS} 题（${algoName}）：播放测试音，请调整滑杆匹配结像大小`);
 
-    // 播放测试音
-    const { stop } = playImageSizeTone(
+    // 播放测试音（使用选定的算法）
+    const { stop } = playImageSizeToneByAlgorithm(
       ctx,
       newSession.trials[0].targetSize,
+      algorithm,
       1.5,
       () => {
         setIsPlayingTest(false);
@@ -149,12 +167,12 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     );
 
     playbackStopRef.current = stop;
-  }, [stopPlayback, setStatus]);
+  }, [stopPlayback, setStatus, algorithm]);
 
   // 重播当前测试音
   const replayTestTone = useCallback(async () => {
-    const currentTrial = getCurrentTrial();
-    if (!currentTrial) {
+    const currentTrialData = getCurrentTrial();
+    if (!currentTrialData) {
       setStatus("请先开始测试");
       return;
     }
@@ -173,12 +191,14 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
 
     setIsPlayingTest(true);
     setPhase("playing-test");
-    setStatus(`第 ${session!.currentTrial + 1}/${TOTAL_TRIALS} 题：重播测试音`);
+    const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
+    setStatus(`第 ${session!.currentTrial + 1}/${TOTAL_TRIALS} 题（${algoName}）：重播测试音`);
 
-    // 播放测试音
-    const { stop } = playImageSizeTone(
+    // 播放测试音（使用选定的算法）
+    const { stop } = playImageSizeToneByAlgorithm(
       ctx,
-      currentTrial.targetSize,
+      currentTrialData.targetSize,
+      algorithm,
       1.5,
       () => {
         setIsPlayingTest(false);
@@ -187,7 +207,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     );
 
     playbackStopRef.current = stop;
-  }, [getCurrentTrial, session, stopPlayback, setStatus]);
+  }, [getCurrentTrial, session, stopPlayback, setStatus, algorithm]);
 
   // 提交答案
   const submitAnswer = useCallback(() => {
@@ -259,11 +279,13 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
 
     setIsPlayingTest(true);
     setPhase("playing-test");
-    setStatus(`第 ${nextIndex + 1}/${TOTAL_TRIALS} 题：播放测试音...`);
+    const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
+    setStatus(`第 ${nextIndex + 1}/${TOTAL_TRIALS} 题（${algoName}）：播放测试音...`);
 
-    const { stop } = playImageSizeTone(
+    const { stop } = playImageSizeToneByAlgorithm(
       ctx,
       nextTrial.targetSize,
+      algorithm,
       1.5,
       () => {
         setIsPlayingTest(false);
@@ -272,7 +294,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     );
 
     playbackStopRef.current = stop;
-  }, [session, setStatus]);
+  }, [session, setStatus, algorithm]);
 
   // 重置测试
   const resetTest = useCallback(() => {
@@ -285,6 +307,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     setIsPlayingReference(false);
     setIsPlayingTest(false);
     setOverallResult(null);
+    // 不重置algorithm，保持用户选择
     setStatus("准备开始测试");
   }, [stopPlayback, setStatus]);
 
@@ -309,7 +332,10 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     isPlayingReference,
     isPlayingTest,
     overallResult,
+    algorithm,
+    algorithmConfigs: ALGORITHM_CONFIGS,
     setUserSize,
+    setAlgorithm,
     playReference,
     startTest,
     replayTestTone,

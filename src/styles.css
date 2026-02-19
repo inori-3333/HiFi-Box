@@ -1614,6 +1614,76 @@ td {
   background: #1565c0;
 }
 
+/* ===== 算法选择器样式 ===== */
+.algorithm-selector {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f9fff8;
+  border: 1px solid #c4ddbc;
+  border-radius: 10px;
+}
+
+.algorithm-selector h4 {
+  margin: 0 0 12px 0;
+  color: #3f5f36;
+  font-size: 15px;
+}
+
+.algorithm-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.algorithm-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px 16px;
+  background: white;
+  border: 2px solid #d5e6d1;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.algorithm-btn:hover:not(:disabled) {
+  border-color: #2f7142;
+  background: #f4fbee;
+}
+
+.algorithm-btn.active {
+  border-color: #2f7142;
+  background: #e8f5e9;
+  box-shadow: 0 2px 8px rgba(47, 113, 66, 0.15);
+}
+
+.algorithm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.algo-name {
+  font-weight: 600;
+  color: #2f7142;
+  font-size: 14px;
+}
+
+.algo-desc {
+  font-size: 12px;
+  color: #555;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.algo-ref {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+  font-style: italic;
+}
+
 .image-size-controls {
   margin-top: 16px;
 }

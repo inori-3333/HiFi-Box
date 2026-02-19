@@ -1,5 +1,6 @@
 import type React from "react";
 import { useImageSizeTest } from "../image-size/useImageSizeTest";
+import type { ImageSizeAlgorithm } from "../image-size/image-size-core";
 
 type ImageSizeStageProps = {
   busy: boolean;
@@ -22,7 +23,10 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
     isPlayingReference,
     isPlayingTest,
     overallResult,
+    algorithm,
+    algorithmConfigs,
     setUserSize,
+    setAlgorithm,
     playReference,
     startTest,
     replayTestTone,
@@ -58,6 +62,33 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
   function handleBackHome() {
     resetTest();
     onBackHome();
+  }
+
+  function handleAlgorithmChange(algo: ImageSizeAlgorithm) {
+    setAlgorithm(algo);
+  }
+
+  // 渲染算法选择器
+  function renderAlgorithmSelector() {
+    return (
+      <div className="algorithm-selector">
+        <h4>选择测试算法：</h4>
+        <div className="algorithm-options">
+          {algorithmConfigs.map((config) => (
+            <button
+              key={config.type}
+              className={`algorithm-btn ${algorithm === config.type ? 'active' : ''}`}
+              onClick={() => handleAlgorithmChange(config.type)}
+              disabled={phase === "playing-test" || phase === "playing-reference"}
+            >
+              <span className="algo-name">{config.name}</span>
+              <span className="algo-desc">{config.description}</span>
+              <span className="algo-ref">参考：{config.reference}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   // 获取结像大小的描述文字
@@ -135,6 +166,9 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
             重置测试
           </button>
         </div>
+
+        {/* 算法选择 */}
+        {renderAlgorithmSelector()}
 
         {/* 题目进度 */}
         {session && renderTrialProgress()}
