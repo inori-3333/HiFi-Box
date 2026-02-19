@@ -124,7 +124,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     window.setTimeout(() => {
       setIsPlayingReference(false);
     }, 1500);
-  }, [stopPlayback, setStatus, phase]);
+  }, [stopPlayback, setStatus, phase, algorithm]);
 
   // 开始测试（生成新的会话）
   const startTest = useCallback(async () => {

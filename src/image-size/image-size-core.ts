@@ -457,42 +457,57 @@ export function createICTDTone(
   // 立体声合并器
   const merger = ctx.createChannelMerger(2);
 
-  // 左声道：直接输出
-  gain.connect(merger, 0, 0);
-
-  // 右声道：通过多个带通滤波器分别延迟
-  // 分频段：低频、中低频、中频、中高频、高频
+  // 分频段配置：低频居中，高频向两侧弥散
+  // width=0 时所有频段居中（延迟为0）
+  // width=1 时高频弥散最大
   const bands = [
-    { freq: 250, delay: 0 },                           // 低频：无延迟
-    { freq: 500, delay: width * 0.005 },              // 中低频：0-5ms
-    { freq: 1000, delay: width * 0.010 },             // 中频：0-10ms
-    { freq: 2000, delay: width * 0.015 },             // 中高频：0-15ms
-    { freq: 4000, delay: width * 0.020 }              // 高频：0-20ms
+    { freq: 250, spread: 0.0 },   // 低频：无弥散，保持居中
+    { freq: 500, spread: 0.25 },  // 中低频：轻微弥散
+    { freq: 1000, spread: 0.5 },  // 中频：中等弥散
+    { freq: 2000, spread: 0.75 }, // 中高频：较大弥散
+    { freq: 4000, spread: 1.0 }   // 高频：最大弥散
   ];
 
-  const rightNodes: AudioNode[] = [];
+  const bandNodes: AudioNode[] = [];
 
-  bands.forEach((band, index) => {
-    // 带通滤波器
+  bands.forEach((band) => {
+    // 计算该频道的左右延迟（对称分布）
+    // 最大延迟差为 ±10ms（总ITD范围±20ms）
+    const maxDelayMs = 0.010; // 10ms
+    const delayOffset = band.spread * width * maxDelayMs;
+
+    // 左声道：向左侧偏移（较早到达）
+    const leftDelayTime = Math.max(0, -delayOffset);
+    // 右声道：向右侧偏移（较晚到达）
+    const rightDelayTime = Math.max(0, delayOffset);
+
+    // 带通滤波器（左右共用信号源）
     const bandpass = ctx.createBiquadFilter();
     bandpass.type = 'bandpass';
     bandpass.frequency.value = band.freq;
     bandpass.Q.value = 1.0;
 
-    // 延迟节点
-    const delay = ctx.createDelay();
-    delay.delayTime.value = band.delay;
-
-    // 该频段增益
+    // 该频段增益（每个频段较低音量，避免叠加过响）
     const bandGain = ctx.createGain();
-    bandGain.gain.value = 0.2; // 每个频段较低音量，避免叠加过响
+    bandGain.gain.value = 0.2;
 
+    // 左声道延迟
+    const leftDelay = ctx.createDelay();
+    leftDelay.delayTime.value = leftDelayTime;
+
+    // 右声道延迟
+    const rightDelay = ctx.createDelay();
+    rightDelay.delayTime.value = rightDelayTime;
+
+    // 连接：增益 -> 带通 -> 左右延迟 -> 合并器
     gain.connect(bandpass);
-    bandpass.connect(delay);
-    delay.connect(bandGain);
-    bandGain.connect(merger, 0, 1);
+    bandpass.connect(bandGain);
+    bandGain.connect(leftDelay);
+    bandGain.connect(rightDelay);
+    leftDelay.connect(merger, 0, 0);
+    rightDelay.connect(merger, 0, 1);
 
-    rightNodes.push(bandpass, delay, bandGain);
+    bandNodes.push(bandpass, bandGain, leftDelay, rightDelay);
   });
 
   // 连接到输出
@@ -503,7 +518,7 @@ export function createICTDTone(
   osc.start(now);
   osc.stop(endTime);
 
-  const nodes: AudioNode[] = [osc, gain, merger, ...rightNodes];
+  const nodes: AudioNode[] = [osc, gain, merger, ...bandNodes];
 
   const stop = () => {
     try {
