@@ -75,7 +75,9 @@ pub fn get_session(state: &AppState) -> Result<MeasurementSession, String> {
         .lock()
         .map_err(|_| "failed to acquire session lock".to_string())?
         .clone()
-        .ok_or_else(|| "calibration session not initialized; call start_calibration first".to_string())
+        .ok_or_else(|| {
+            "calibration session not initialized; call start_calibration first".to_string()
+        })
 }
 
 pub fn calibrate_session(session: &MeasurementSession) -> Result<CalibrationSession, String> {
@@ -90,7 +92,9 @@ pub fn calibrate_session(session: &MeasurementSession) -> Result<CalibrationSess
         warnings.push("Noise floor is high; use quieter environment".to_string());
     }
     if ref_level_db < -45.0 {
-        warnings.push("Reference signal is weak; check headphone output and microphone coupling".to_string());
+        warnings.push(
+            "Reference signal is weak; check headphone output and microphone coupling".to_string(),
+        );
     }
 
     let status = if warnings.is_empty() {
@@ -214,10 +218,16 @@ fn output_caps(device: &cpal::Device) -> (u16, Vec<u32>) {
 
 fn parse_device_id(id: &str, expected_kind: &str) -> Result<usize, String> {
     let mut parts = id.split("::");
-    let kind = parts.next().ok_or_else(|| format!("invalid device id: {id}"))?;
-    let idx_str = parts.next().ok_or_else(|| format!("invalid device id: {id}"))?;
+    let kind = parts
+        .next()
+        .ok_or_else(|| format!("invalid device id: {id}"))?;
+    let idx_str = parts
+        .next()
+        .ok_or_else(|| format!("invalid device id: {id}"))?;
     if kind != expected_kind {
-        return Err(format!("device id kind mismatch: expected {expected_kind}, got {kind}"));
+        return Err(format!(
+            "device id kind mismatch: expected {expected_kind}, got {kind}"
+        ));
     }
     idx_str
         .parse::<usize>()
@@ -240,10 +250,15 @@ fn resolve_output_device(host: &cpal::Host, id: &str) -> Result<cpal::Device, St
         .ok_or_else(|| format!("output device not found: {id}"))
 }
 
-fn select_input_config(device: &cpal::Device, desired_sample_rate: u32) -> Result<(StreamConfig, SampleFormat), String> {
+fn select_input_config(
+    device: &cpal::Device,
+    desired_sample_rate: u32,
+) -> Result<(StreamConfig, SampleFormat), String> {
     if let Ok(ranges) = device.supported_input_configs() {
         for range in ranges {
-            if desired_sample_rate >= range.min_sample_rate().0 && desired_sample_rate <= range.max_sample_rate().0 {
+            if desired_sample_rate >= range.min_sample_rate().0
+                && desired_sample_rate <= range.max_sample_rate().0
+            {
                 let cfg = range.with_sample_rate(SampleRate(desired_sample_rate));
                 return Ok((
                     StreamConfig {
@@ -270,10 +285,15 @@ fn select_input_config(device: &cpal::Device, desired_sample_rate: u32) -> Resul
     ))
 }
 
-fn select_output_config(device: &cpal::Device, desired_sample_rate: u32) -> Result<(StreamConfig, SampleFormat), String> {
+fn select_output_config(
+    device: &cpal::Device,
+    desired_sample_rate: u32,
+) -> Result<(StreamConfig, SampleFormat), String> {
     if let Ok(ranges) = device.supported_output_configs() {
         for range in ranges {
-            if desired_sample_rate >= range.min_sample_rate().0 && desired_sample_rate <= range.max_sample_rate().0 {
+            if desired_sample_rate >= range.min_sample_rate().0
+                && desired_sample_rate <= range.max_sample_rate().0
+            {
                 let cfg = range.with_sample_rate(SampleRate(desired_sample_rate));
                 return Ok((
                     StreamConfig {
@@ -439,7 +459,8 @@ where
                         }
                         for (idx, out) in frame.iter_mut().enumerate() {
                             let v = sample * channel_gain(channel_mode, idx, channels);
-                            let scaled = ((v * 0.5 + 0.5) * u16::MAX as f32).clamp(0.0, u16::MAX as f32);
+                            let scaled =
+                                ((v * 0.5 + 0.5) * u16::MAX as f32).clamp(0.0, u16::MAX as f32);
                             *out = scaled as u16;
                         }
                     }
@@ -452,7 +473,11 @@ where
     }
 }
 
-fn wait_for_capture(shared_samples: &Arc<Mutex<Vec<f32>>>, target_samples: usize, duration_ms: u64) -> Result<(), String> {
+fn wait_for_capture(
+    shared_samples: &Arc<Mutex<Vec<f32>>>,
+    target_samples: usize,
+    duration_ms: u64,
+) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_millis(duration_ms + 1200);
     loop {
         if let Ok(buffer) = shared_samples.lock() {
@@ -461,7 +486,9 @@ fn wait_for_capture(shared_samples: &Arc<Mutex<Vec<f32>>>, target_samples: usize
             }
         }
         if Instant::now() >= deadline {
-            return Err("audio capture timeout; check device availability and permissions".to_string());
+            return Err(
+                "audio capture timeout; check device availability and permissions".to_string(),
+            );
         }
         thread::sleep(Duration::from_millis(20));
     }

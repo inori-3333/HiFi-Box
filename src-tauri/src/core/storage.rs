@@ -25,7 +25,8 @@ pub fn save_project_local(project: &TestProject) -> Result<SaveResult, String> {
     ensure_dir(&project_dir)?;
 
     let json_path = project_dir.join("project.json");
-    let content = serde_json::to_string_pretty(project).map_err(|e| format!("serialize project failed: {e}"))?;
+    let content = serde_json::to_string_pretty(project)
+        .map_err(|e| format!("serialize project failed: {e}"))?;
     fs::write(&json_path, content).map_err(|e| format!("write project failed: {e}"))?;
 
     Ok(SaveResult {
@@ -107,12 +108,14 @@ pub fn export_report_local(project_id: &str, format: &str) -> Result<ExportResul
 
     let (output_path, fmt) = if format.eq_ignore_ascii_case("json") {
         let output_path = out_dir.join(format!("report_{}_{}.json", project_id, timestamp));
-        let content = serde_json::to_string_pretty(&project).map_err(|e| format!("serialize report failed: {e}"))?;
+        let content = serde_json::to_string_pretty(&project)
+            .map_err(|e| format!("serialize report failed: {e}"))?;
         fs::write(&output_path, content).map_err(|e| format!("write report failed: {e}"))?;
         (output_path, "json")
     } else {
         let output_path = out_dir.join(format!("report_{}_{}.html", project_id, timestamp));
-        fs::write(&output_path, html_template(&project)).map_err(|e| format!("write html report failed: {e}"))?;
+        fs::write(&output_path, html_template(&project))
+            .map_err(|e| format!("write html report failed: {e}"))?;
         (output_path, "html")
     };
 

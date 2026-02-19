@@ -116,6 +116,216 @@ pub struct AbxResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConceptTestResult {
+    pub concept: String,
+    pub score: f32,
+    pub low_confidence: bool,
+    pub notes: Vec<String>,
+    pub metrics: ConceptMetrics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ConceptMetrics {
+    Ild(IldMetrics),
+    Bass(BassMetrics),
+    Treble(TrebleMetrics),
+    Resolution(ResolutionMetrics),
+    Separation(SeparationMetrics),
+    Transient(TransientMetrics),
+    Dynamic(DynamicMetrics),
+    Density(DensityMetrics),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IldBandPoint {
+    pub frequency_hz: f32,
+    pub delta_db: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IldMetrics {
+    pub delta_db_avg: f32,
+    pub delta_db_max: f32,
+    pub by_band: Vec<IldBandPoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BassMetrics {
+    pub f_3db_hz: f32,
+    pub f_5db_hz: f32,
+    pub spl_30hz: f32,
+    pub spl_40hz: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrebleMetrics {
+    pub f_3db_high_hz: f32,
+    pub rolloff_db_per_oct: f32,
+    pub peak_8k_12k_db: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolutionMetrics {
+    pub detail_detect_rate: f32,
+    pub d_prime: f32,
+    pub min_detectable_snr_db: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeparationMetrics {
+    pub crosstalk_1khz_db: f32,
+    pub crosstalk_avg_db: f32,
+    pub imaging_error_deg: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransientMetrics {
+    pub rise_ms: f32,
+    pub overshoot_pct: f32,
+    pub settle_ms: f32,
+    pub decay_30db_ms: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicMetrics {
+    pub noise_floor_db_spl: f32,
+    pub max_clean_spl_db: f32,
+    pub dynamic_range_db: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DensityMetrics {
+    pub mid_high_energy_ratio: f32,
+    pub hnr_db: f32,
+    pub subjective_density_10: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IldTestConfig {
+    #[serde(default)]
+    pub repeats: Option<u32>,
+    #[serde(default)]
+    pub tone_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_amplitude: Option<f32>,
+    #[serde(default)]
+    pub inter_tone_pause_ms: Option<u64>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BassExtensionTestConfig {
+    #[serde(default)]
+    pub repeats: Option<u32>,
+    #[serde(default)]
+    pub points: Option<usize>,
+    #[serde(default)]
+    pub start_hz: Option<f32>,
+    #[serde(default)]
+    pub end_hz: Option<f32>,
+    #[serde(default)]
+    pub reference_hz: Option<f32>,
+    #[serde(default)]
+    pub tone_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_amplitude: Option<f32>,
+    #[serde(default)]
+    pub inter_tone_pause_ms: Option<u64>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TrebleExtensionTestConfig {
+    #[serde(default)]
+    pub repeats: Option<u32>,
+    #[serde(default)]
+    pub points: Option<usize>,
+    #[serde(default)]
+    pub start_hz: Option<f32>,
+    #[serde(default)]
+    pub end_hz: Option<f32>,
+    #[serde(default)]
+    pub reference_hz: Option<f32>,
+    #[serde(default)]
+    pub tone_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_amplitude: Option<f32>,
+    #[serde(default)]
+    pub inter_tone_pause_ms: Option<u64>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResolutionTestConfig {
+    #[serde(default)]
+    pub trials_per_snr: Option<u32>,
+    #[serde(default)]
+    pub snr_levels_db: Option<Vec<f32>>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SeparationTestConfig {
+    #[serde(default)]
+    pub repeats: Option<u32>,
+    #[serde(default)]
+    pub tone_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_amplitude: Option<f32>,
+    #[serde(default)]
+    pub inter_tone_pause_ms: Option<u64>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TransientTestConfig {
+    #[serde(default)]
+    pub repeats: Option<u32>,
+    #[serde(default)]
+    pub pulse_hz: Option<f32>,
+    #[serde(default)]
+    pub tone_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_amplitude: Option<f32>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicRangeTestConfig {
+    #[serde(default)]
+    pub noise_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_amplitude: Option<f32>,
+    #[serde(default)]
+    pub thdn_limit_percent: Option<f32>,
+    #[serde(default)]
+    pub step_levels_db: Option<Vec<f32>>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DensityTestConfig {
+    #[serde(default)]
+    pub subjective_density_10: Option<f32>,
+    #[serde(default)]
+    pub tone_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub tone_amplitude: Option<f32>,
+    #[serde(default)]
+    pub seed: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreInput {
     pub abx_result: AbxResult,
     pub sweep_result: SweepResult,

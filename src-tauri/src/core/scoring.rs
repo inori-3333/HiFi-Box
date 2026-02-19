@@ -15,8 +15,10 @@ pub fn compute(input: ScoreInput) -> ScoreResult {
     let thd_score = clamp_score(100.0 - input.thd_result.total_thd_percent * 35.0);
     let channel_score = clamp_score(input.channel_result.match_score);
 
-    let total_score =
-        abx_score * WEIGHT_ABX + sweep_score * WEIGHT_SWEEP + thd_score * WEIGHT_THD + channel_score * WEIGHT_CHANNEL;
+    let total_score = abx_score * WEIGHT_ABX
+        + sweep_score * WEIGHT_SWEEP
+        + thd_score * WEIGHT_THD
+        + channel_score * WEIGHT_CHANNEL;
 
     let mut explanations = Vec::new();
 

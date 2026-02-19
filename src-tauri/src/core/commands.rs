@@ -1,8 +1,10 @@
 use super::audio;
 use super::models::{
-    AbxConfig, AbxResult, CalibrationSession, ChannelMatchConfig, ChannelMatchResult, DeviceInfo,
-    ExportResult, ProjectSummary, SaveResult, ScoreInput, ScoreResult, SweepConfig, SweepResult, TestProject,
-    ThdConfig, ThdResult,
+    AbxConfig, AbxResult, BassExtensionTestConfig, CalibrationSession, ChannelMatchConfig,
+    ChannelMatchResult, ConceptTestResult, DensityTestConfig, DeviceInfo, DynamicRangeTestConfig,
+    ExportResult, IldTestConfig, ProjectSummary, ResolutionTestConfig, SaveResult, ScoreInput,
+    ScoreResult, SeparationTestConfig, SweepConfig, SweepResult, TestProject, ThdConfig, ThdResult,
+    TransientTestConfig, TrebleExtensionTestConfig,
 };
 use super::{scoring, storage, testsuite};
 use tauri::State;
@@ -40,13 +42,19 @@ pub fn run_abx_test(config: AbxConfig) -> AbxResult {
 }
 
 #[tauri::command]
-pub fn run_sweep_test(state: State<'_, audio::AppState>, config: SweepConfig) -> Result<SweepResult, String> {
+pub fn run_sweep_test(
+    state: State<'_, audio::AppState>,
+    config: SweepConfig,
+) -> Result<SweepResult, String> {
     let session = audio::get_session(&state)?;
     testsuite::run_sweep(config, Some(&session))
 }
 
 #[tauri::command]
-pub fn run_thd_test(state: State<'_, audio::AppState>, config: ThdConfig) -> Result<ThdResult, String> {
+pub fn run_thd_test(
+    state: State<'_, audio::AppState>,
+    config: ThdConfig,
+) -> Result<ThdResult, String> {
     let session = audio::get_session(&state)?;
     testsuite::run_thd(config, Some(&session))
 }
@@ -58,6 +66,74 @@ pub fn run_channel_match_test(
 ) -> Result<ChannelMatchResult, String> {
     let session = audio::get_session(&state)?;
     testsuite::run_channel_match(config, Some(&session))
+}
+
+#[tauri::command]
+pub fn run_ild_test(
+    state: State<'_, audio::AppState>,
+    config: IldTestConfig,
+) -> Result<ConceptTestResult, String> {
+    let session = audio::get_session(&state).ok();
+    testsuite::run_ild(config, session.as_ref())
+}
+
+#[tauri::command]
+pub fn run_bass_extension_test(
+    state: State<'_, audio::AppState>,
+    config: BassExtensionTestConfig,
+) -> Result<ConceptTestResult, String> {
+    let session = audio::get_session(&state).ok();
+    testsuite::run_bass_extension(config, session.as_ref())
+}
+
+#[tauri::command]
+pub fn run_treble_extension_test(
+    state: State<'_, audio::AppState>,
+    config: TrebleExtensionTestConfig,
+) -> Result<ConceptTestResult, String> {
+    let session = audio::get_session(&state).ok();
+    testsuite::run_treble_extension(config, session.as_ref())
+}
+
+#[tauri::command]
+pub fn run_resolution_test(config: ResolutionTestConfig) -> ConceptTestResult {
+    testsuite::run_resolution(config)
+}
+
+#[tauri::command]
+pub fn run_separation_test(
+    state: State<'_, audio::AppState>,
+    config: SeparationTestConfig,
+) -> Result<ConceptTestResult, String> {
+    let session = audio::get_session(&state).ok();
+    testsuite::run_separation(config, session.as_ref())
+}
+
+#[tauri::command]
+pub fn run_transient_test(
+    state: State<'_, audio::AppState>,
+    config: TransientTestConfig,
+) -> Result<ConceptTestResult, String> {
+    let session = audio::get_session(&state).ok();
+    testsuite::run_transient(config, session.as_ref())
+}
+
+#[tauri::command]
+pub fn run_dynamic_range_test(
+    state: State<'_, audio::AppState>,
+    config: DynamicRangeTestConfig,
+) -> Result<ConceptTestResult, String> {
+    let session = audio::get_session(&state).ok();
+    testsuite::run_dynamic_range(config, session.as_ref())
+}
+
+#[tauri::command]
+pub fn run_density_test(
+    state: State<'_, audio::AppState>,
+    config: DensityTestConfig,
+) -> Result<ConceptTestResult, String> {
+    let session = audio::get_session(&state).ok();
+    testsuite::run_density(config, session.as_ref())
 }
 
 #[tauri::command]

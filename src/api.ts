@@ -1,19 +1,28 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AbxResult,
+  BassExtensionTestConfig,
   CalibrationSession,
   ChannelAcquisitionConfig,
   ChannelMatchResult,
+  ConceptTestResult,
+  DensityTestConfig,
   DeviceInfo,
+  DynamicRangeTestConfig,
   ExportResult,
+  IldTestConfig,
   ProjectSummary,
+  ResolutionTestConfig,
   SaveResult,
   ScoreResult,
+  SeparationTestConfig,
   SweepAcquisitionConfig,
   SweepResult,
   TestProject,
   ThdAcquisitionConfig,
-  ThdResult
+  ThdResult,
+  TransientTestConfig,
+  TrebleExtensionTestConfig
 } from "./types";
 
 export const api = {
@@ -42,6 +51,22 @@ export const api = {
     acquisition?: ChannelAcquisitionConfig;
   }) =>
     invoke<ChannelMatchResult>("run_channel_match_test", { config }),
+  runIldTest: (config: IldTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_ild_test", { config }),
+  runBassExtensionTest: (config: BassExtensionTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_bass_extension_test", { config }),
+  runTrebleExtensionTest: (config: TrebleExtensionTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_treble_extension_test", { config }),
+  runResolutionTest: (config: ResolutionTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_resolution_test", { config }),
+  runSeparationTest: (config: SeparationTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_separation_test", { config }),
+  runTransientTest: (config: TransientTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_transient_test", { config }),
+  runDynamicRangeTest: (config: DynamicRangeTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_dynamic_range_test", { config }),
+  runDensityTest: (config: DensityTestConfig = {}) =>
+    invoke<ConceptTestResult>("run_density_test", { config }),
   computeScore: (input: {
     abx_result: AbxResult;
     sweep_result: SweepResult;
