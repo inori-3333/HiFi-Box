@@ -321,6 +321,14 @@ export default function App() {
     }
   }
 
+  function openConceptTestsAndRun(
+    label: string,
+    runner: () => Promise<ConceptTestResult>
+  ) {
+    setStage("concept-tests");
+    void runConceptTest(label, runner);
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -398,17 +406,64 @@ export default function App() {
               >
                 空间结像大小测试
               </button>
-              {!isWebDemo && (
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    setStage("concept-tests");
-                    setStatus("进入八项声学能力测试");
-                  }}
-                >
-                  八项声学能力测试
-                </button>
-              )}
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() => openConceptTestsAndRun("左右耳声压差", () => api.runIldTest({ repeats: 3 }))}
+              >
+                左右耳声压差
+              </button>
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() => openConceptTestsAndRun("低频下潜", () => api.runBassExtensionTest({ repeats: 3 }))}
+              >
+                低频下潜
+              </button>
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() => openConceptTestsAndRun("高频延伸", () => api.runTrebleExtensionTest({ repeats: 3 }))}
+              >
+                高频延伸
+              </button>
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() =>
+                  openConceptTestsAndRun("解析", () => Promise.resolve(api.runResolutionTest({ trials_per_snr: 10 })))
+                }
+              >
+                解析
+              </button>
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() => openConceptTestsAndRun("分离", () => api.runSeparationTest({ repeats: 3 }))}
+              >
+                分离
+              </button>
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() => openConceptTestsAndRun("瞬态", () => api.runTransientTest({ repeats: 3 }))}
+              >
+                瞬态
+              </button>
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() => openConceptTestsAndRun("动态", () => api.runDynamicRangeTest({}))}
+              >
+                动态
+              </button>
+              <button
+                disabled={busy || isWebDemo}
+                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
+                onClick={() => openConceptTestsAndRun("密度", () => api.runDensityTest({ subjective_density_10: 7 }))}
+              >
+                密度
+              </button>
               {!isWebDemo && (
                 <button disabled={busy} onClick={refreshHistory}>
                   刷新历史
