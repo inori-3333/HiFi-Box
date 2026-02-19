@@ -13,6 +13,8 @@ import {
 import type { SpatialMode, SpatialPoint, SpatialSceneProfile, SpatialTrial } from "./spatial-core";
 
 const BASELINE_POSITION_CYCLES = 1;
+
+const timbreNames = ["鼓点声", "军鼓声", "镲片声", "扫弦声", "桶鼓声", "拍手声", "铃铛声", "拨弦声"];
 const BASELINE_AUTOPLAY_DELAY_MS = 1000;
 const BASELINE_INTER_TONE_GAP_SEC = 0.3;
 const BASELINE_REPEAT_COUNT_PER_TONE = 2;
@@ -260,7 +262,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     }
     setSelectedTimbreIdState(next);
     setSpatialTrials((old) => old.map((trial) => ({ ...trial, cueTimbreId: next })));
-    setStatus(`已切换基准音色为 #${next + 1}`);
+    setStatus(`已切换基准音色为 ${timbreNames[next]}`);
   }
 
   function setSpeakerMode2d(enabled: boolean) {
@@ -300,7 +302,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       cueStopTimeoutRef.current = null;
     }, Math.max(100, Math.ceil((playback.endAt - ctx.currentTime + 0.15) * 1000)));
 
-    setStatus(`已播放第 ${trial.id} 题提示音（音色 #${trial.cueTimbreId + 1}），请选择位置后提交。`);
+    setStatus(`已播放第 ${trial.id} 题提示音（${timbreNames[trial.cueTimbreId]}），请选择位置后提交。`);
   }
 
   async function playSpatialCue() {
@@ -354,7 +356,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
         return;
       }
       stopBaselineSweep();
-      setStatus(`单点基准音播放完成（音色 #${selectedTimbreId + 1}）。`);
+      setStatus(`单点基准音播放完成（${timbreNames[selectedTimbreId]}）。`);
     }, totalMs);
     timeoutIds.push(finishTimeout);
   }
@@ -392,7 +394,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
       activeStops.forEach((stop) => stop(stopAt));
     };
 
-    setStatus(`正在播放基准音：9 点单轮（每点连放 ${BASELINE_REPEAT_COUNT_PER_TONE} 次，音色 #${selectedTimbreId + 1}）...`);
+    setStatus(`正在播放基准音：9 点单轮（每点连放 ${BASELINE_REPEAT_COUNT_PER_TONE} 次，${timbreNames[selectedTimbreId]}）...`);
 
     let sequenceEndAt = sequenceStartAt;
     let toneStartAt = sequenceStartAt;

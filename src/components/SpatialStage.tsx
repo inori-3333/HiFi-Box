@@ -3,6 +3,8 @@ import { clamp01ToSigned, planePointToPercent } from "../spatial/spatial-core";
 import type { SpatialPlane, SpatialPoint } from "../spatial/spatial-core";
 import type { SpatialTestController } from "../spatial/useSpatialTest";
 
+const timbreNames = ["鼓点声", "军鼓声", "镲片声", "扫弦声", "桶鼓声", "拍手声", "铃铛声", "拨弦声"];
+
 type SpatialStageProps = {
   busy: boolean;
   onBackHome: () => void;
@@ -182,7 +184,7 @@ export function SpatialStage(props: SpatialStageProps) {
               >
                 {Array.from({ length: 8 }, (_, idx) => (
                   <option key={`timbre-${idx}`} value={idx}>
-                    音色 #{idx + 1}
+                    {timbreNames[idx]}
                   </option>
                 ))}
               </select>
