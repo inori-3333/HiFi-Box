@@ -602,3 +602,305 @@ td {
     font-size: 40px;
   }
 }
+
+/* ===== 3D Sound Field Styles ===== */
+.soundfield-3d-container {
+  perspective: 1200px;
+  width: 100%;
+  height: 400px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  user-select: none;
+}
+
+.soundfield-3d-scene {
+  transform-style: preserve-3d;
+  transform: rotateX(-15deg) rotateY(25deg);
+  transition: transform 0.3s ease;
+  position: relative;
+  width: 280px;
+  height: 280px;
+}
+
+.soundfield-3d-scene.dragging {
+  transition: none;
+}
+
+/* 3D Cube */
+.soundfield-cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+/* Cube Faces */
+.cube-face {
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  border: 2px solid rgba(100, 100, 100, 0.3);
+  background: rgba(50, 50, 50, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: crosshair;
+  overflow: hidden;
+}
+
+/* Face-specific styles and transforms */
+.cube-face-front {
+  transform: translateZ(140px);
+  background: linear-gradient(to bottom, rgba(0, 100, 255, 0.08), rgba(240, 255, 240, 0.1));
+}
+
+.cube-face-back {
+  transform: rotateY(180deg) translateZ(140px);
+  background: linear-gradient(to top, rgba(0, 100, 255, 0.05), rgba(240, 255, 240, 0.08));
+}
+
+.cube-face-right {
+  transform: rotateY(90deg) translateZ(140px);
+  background: linear-gradient(to left, rgba(255, 100, 0, 0.08), rgba(255, 240, 240, 0.1));
+}
+
+.cube-face-left {
+  transform: rotateY(-90deg) translateZ(140px);
+  background: linear-gradient(to right, rgba(255, 100, 0, 0.05), rgba(255, 240, 240, 0.08));
+}
+
+.cube-face-top {
+  transform: rotateX(90deg) translateZ(140px);
+  background: linear-gradient(to bottom, rgba(100, 255, 100, 0.08), rgba(240, 255, 240, 0.1));
+}
+
+.cube-face-bottom {
+  transform: rotateX(-90deg) translateZ(140px);
+  background: linear-gradient(to top, rgba(100, 255, 100, 0.05), rgba(240, 255, 240, 0.08));
+}
+
+/* Grid on cube faces */
+.cube-grid {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-image:
+    linear-gradient(rgba(150, 150, 150, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(150, 150, 150, 0.3) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+
+/* Axis lines on cube faces */
+.cube-axis-x {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  background: rgba(220, 80, 80, 0.6);
+  pointer-events: none;
+}
+
+.cube-axis-y {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: rgba(80, 80, 220, 0.6);
+  pointer-events: none;
+}
+
+/* Face labels */
+.cube-face-label {
+  position: absolute;
+  font-size: 11px;
+  color: rgba(80, 80, 80, 0.7);
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.cube-face-label.front { bottom: 8px; left: 50%; transform: translateX(-50%); }
+.cube-face-label.back { top: 8px; left: 50%; transform: translateX(-50%); }
+.cube-face-label.right { left: 8px; top: 50%; transform: translateY(-50%) rotate(-90deg); }
+.cube-face-label.left { right: 8px; top: 50%; transform: translateY(-50%) rotate(90deg); }
+.cube-face-label.top { bottom: 8px; left: 50%; transform: translateX(-50%); }
+.cube-face-label.bottom { top: 8px; left: 50%; transform: translateX(-50%); }
+
+/* 3D Spatial Dots */
+.spatial-dot-3d {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) translate3d(var(--x, 0px), var(--y, 0px), var(--z, 0px));
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+
+.spatial-dot-3d-user {
+  background: #2196f3;
+  box-shadow: 0 0 12px rgba(33, 150, 243, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  z-index: 10;
+}
+
+.spatial-dot-3d-target {
+  background: #f44336;
+  box-shadow: 0 0 12px rgba(244, 67, 54, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  z-index: 10;
+}
+
+.spatial-dot-3d-history {
+  background: #9e9e9e;
+  opacity: 0.5;
+  transform: translate(-50%, -50%) translate3d(var(--x, 0px), var(--y, 0px), var(--z, 0px)) scale(0.7);
+}
+
+/* Listener position (center) */
+.listener-position {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border: 3px solid #444;
+  border-radius: 50%;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+.listener-head {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 10px solid #444;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -140%);
+  z-index: 6;
+}
+
+/* Rotation controls */
+.soundfield-rotation-controls {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.rotation-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  background: #f4fbee;
+  border: 1px solid #c4ddbc;
+  color: #2f7142;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rotation-btn:hover {
+  background: #e8f5e9;
+}
+
+.rotation-btn.active {
+  background: #2f7142;
+  color: white;
+  border-color: #2f7142;
+}
+
+/* 3D Position info */
+.soundfield-position-info {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #555;
+}
+
+.position-coordinate {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.position-coordinate .axis-label {
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.position-coordinate .axis-label.x {
+  background: rgba(220, 80, 80, 0.2);
+  color: #c53030;
+}
+
+.position-coordinate .axis-label.y {
+  background: rgba(80, 80, 220, 0.2);
+  color: #2b6cb0;
+}
+
+.position-coordinate .axis-label.z {
+  background: rgba(80, 180, 80, 0.2);
+  color: #2f855a;
+}
+
+/* Z-axis slider container */
+.soundfield-z-control {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #f4fbee;
+  border-radius: 8px;
+  border: 1px solid #d5e6d1;
+}
+
+.soundfield-z-control label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.soundfield-z-control input[type="range"] {
+  flex: 1;
+  margin: 0;
+}
+
+.soundfield-z-control .z-value {
+  min-width: 50px;
+  text-align: center;
+  font-weight: 600;
+  color: #2f855a;
+}
+
+/* Responsive adjustments for 3D */
+@media (max-width: 640px) {
+  .soundfield-3d-container {
+    height: 320px;
+  }
+
+  .soundfield-3d-scene,
+  .soundfield-cube,
+  .cube-face {
+    width: 220px;
+    height: 220px;
+  }
+
+  .cube-face-front { transform: translateZ(110px); }
+  .cube-face-back { transform: rotateY(180deg) translateZ(110px); }
+  .cube-face-right { transform: rotateY(90deg) translateZ(110px); }
+  .cube-face-left { transform: rotateY(-90deg) translateZ(110px); }
+  .cube-face-top { transform: rotateX(90deg) translateZ(110px); }
+  .cube-face-bottom { transform: rotateX(-90deg) translateZ(110px); }
+}

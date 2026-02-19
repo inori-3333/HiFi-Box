@@ -1,4 +1,5 @@
 import type React from "react";
+import { useState, useRef, useCallback } from "react";
 import { useSoundField } from "../soundfield/useSoundField";
 import type { SoundFieldPoint, SoundFieldDimension } from "../soundfield/soundfield-core";
 
@@ -14,6 +15,19 @@ const DIMENSION_NAMES: Record<SoundFieldDimension, string> = {
   height: "高度",
   immersion: "沉浸感"
 };
+
+// 3D Scene constants
+const CUBE_SIZE = 280; // px
+const HALF_CUBE = CUBE_SIZE / 2;
+
+// Convert 3D coordinates to CSS translate3d values
+function toCSSPosition(point: SoundFieldPoint): { x: string; y: string; z: string } {
+  return {
+    x: `${point.x * HALF_CUBE}px`,
+    y: `${-point.y * HALF_CUBE}px`, // Y axis in CSS goes down, spatial Y goes up
+    z: `${point.z * HALF_CUBE}px`
+  };
+}
 
 export function SoundFieldStage(props: SoundFieldStageProps) {
   const { busy, setStatus, onBackHome } = props;
@@ -49,29 +63,138 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     reset
   } = test;
 
+  // 3D Scene state
+  const [sceneRotation, setSceneRotation] = useState({ x: -15, y: 25 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [tempZ, setTempZ] = useState(0); // Temporary Z coordinate before submitting
+  const dragStartRef = useRef({ x: 0, y: 0, rotX: 0, rotY: 0 });
+  const sceneRef = useRef<HTMLDivElement>(null);
+
   // 处理返回
   function handleBackHome() {
     reset();
     onBackHome();
   }
 
-  // 处理点击声场区域
-  function handleArenaClick(e: React.MouseEvent<HTMLDivElement>) {
+  // 3D Scene drag handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.target instanceof HTMLElement && e.target.closest('.cube-face')) {
+      // Don't start drag if clicking on a face (allow click to set position)
+      return;
+    }
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      rotX: sceneRotation.x,
+      rotY: sceneRotation.y
+    };
+  }, [sceneRotation]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+    setSceneRotation({
+      x: Math.max(-90, Math.min(90, dragStartRef.current.rotX - dy * 0.5)),
+      y: dragStartRef.current.rotY + dx * 0.5
+    });
+  }, [isDragging]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Handle click on 3D cube face
+  const handleCubeFaceClick = useCallback((face: string, e: React.MouseEvent<HTMLDivElement>) => {
     if (mode !== "positioning") return;
     if (!currentTarget) return;
+    if (isDragging) return; // Don't process click if we were dragging
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
-    const y = -(e.clientY - rect.top) / rect.height * 2 + 1;
+    const u = (e.clientX - rect.left) / rect.width; // 0 to 1 (left to right)
+    const v = (e.clientY - rect.top) / rect.height; // 0 to 1 (top to bottom)
+
+    // Convert to -1 to 1 range
+    const nu = (u - 0.5) * 2;
+    const nv = -(v - 0.5) * 2; // Invert Y so positive is up
+
+    let x = 0, y = 0, z = tempZ;
+
+    switch (face) {
+      case 'front': // Y+ plane, Z varies by tempZ
+        x = nu;
+        y = 1; // Front face is at Y = 1
+        z = nv;
+        setTempZ(nv);
+        break;
+      case 'back': // Y- plane
+        x = -nu;
+        y = -1; // Back face is at Y = -1
+        z = nv;
+        setTempZ(nv);
+        break;
+      case 'right': // X+ plane
+        x = 1; // Right face is at X = 1
+        y = nu;
+        z = nv;
+        setTempZ(nv);
+        break;
+      case 'left': // X- plane
+        x = -1; // Left face is at X = -1
+        y = -nu;
+        z = nv;
+        setTempZ(nv);
+        break;
+      case 'top': // Z+ plane
+        x = nu;
+        y = nv;
+        z = 1; // Top face is at Z = 1
+        setTempZ(1);
+        break;
+      case 'bottom': // Z- plane
+        x = nu;
+        y = nv;
+        z = -1; // Bottom face is at Z = -1
+        setTempZ(-1);
+        break;
+    }
 
     const guess: SoundFieldPoint = {
       x: Math.max(-1, Math.min(1, x)),
       y: Math.max(-1, Math.min(1, y)),
-      z: 0
+      z: Math.max(-1, Math.min(1, z))
     };
 
     submitGuess(guess);
-  }
+  }, [mode, currentTarget, isDragging, tempZ, submitGuess]);
+
+  // Preset rotation views
+  const setPresetView = useCallback((view: string) => {
+    switch (view) {
+      case 'front':
+        setSceneRotation({ x: 0, y: 0 });
+        break;
+      case 'back':
+        setSceneRotation({ x: 0, y: 180 });
+        break;
+      case 'right':
+        setSceneRotation({ x: 0, y: -90 });
+        break;
+      case 'left':
+        setSceneRotation({ x: 0, y: 90 });
+        break;
+      case 'top':
+        setSceneRotation({ x: -90, y: 0 });
+        break;
+      case 'bottom':
+        setSceneRotation({ x: 90, y: 0 });
+        break;
+      case 'iso':
+        setSceneRotation({ x: -20, y: 45 });
+        break;
+    }
+  }, []);
 
   // 获取当前维度颜色
   function getDimensionColor(dim: SoundFieldDimension): string {
@@ -87,10 +210,177 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     }
   }
 
+  // 渲染3D场景
+  function render3DScene() {
+    const currentTrialData = trials[currentTrial];
+    const showTarget = currentTrialData?.target && mode === "positioning";
+
+    return (
+      <div className="soundfield-3d-container">
+        <div
+          ref={sceneRef}
+          className={`soundfield-3d-scene ${isDragging ? "dragging" : ""}`}
+          style={{
+            transform: `rotateX(${sceneRotation.x}deg) rotateY(${sceneRotation.y}deg)`
+          }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          <div className="soundfield-cube">
+            {/* Front face (Y+) */}
+            <div
+              className="cube-face cube-face-front"
+              onClick={(e) => handleCubeFaceClick("front", e)}
+              title="点击标记位置"
+            >
+              <div className="cube-grid" />
+              <div className="cube-axis-x" />
+              <div className="cube-axis-y" />
+              <span className="cube-face-label front">前 (Y+)</span>
+            </div>
+
+            {/* Back face (Y-) */}
+            <div
+              className="cube-face cube-face-back"
+              onClick={(e) => handleCubeFaceClick("back", e)}
+              title="点击标记位置"
+            >
+              <div className="cube-grid" />
+              <div className="cube-axis-x" />
+              <div className="cube-axis-y" />
+              <span className="cube-face-label back">后 (Y-)</span>
+            </div>
+
+            {/* Right face (X+) */}
+            <div
+              className="cube-face cube-face-right"
+              onClick={(e) => handleCubeFaceClick("right", e)}
+              title="点击标记位置"
+            >
+              <div className="cube-grid" />
+              <div className="cube-axis-x" />
+              <div className="cube-axis-y" />
+              <span className="cube-face-label right">右 (X+)</span>
+            </div>
+
+            {/* Left face (X-) */}
+            <div
+              className="cube-face cube-face-left"
+              onClick={(e) => handleCubeFaceClick("left", e)}
+              title="点击标记位置"
+            >
+              <div className="cube-grid" />
+              <div className="cube-axis-x" />
+              <div className="cube-axis-y" />
+              <span className="cube-face-label left">左 (X-)</span>
+            </div>
+
+            {/* Top face (Z+) */}
+            <div
+              className="cube-face cube-face-top"
+              onClick={(e) => handleCubeFaceClick("top", e)}
+              title="点击标记位置"
+            >
+              <div className="cube-grid" />
+              <div className="cube-axis-x" />
+              <div className="cube-axis-y" />
+              <span className="cube-face-label top">上 (Z+)</span>
+            </div>
+
+            {/* Bottom face (Z-) */}
+            <div
+              className="cube-face cube-face-bottom"
+              onClick={(e) => handleCubeFaceClick("bottom", e)}
+              title="点击标记位置"
+            >
+              <div className="cube-grid" />
+              <div className="cube-axis-x" />
+              <div className="cube-axis-y" />
+              <span className="cube-face-label bottom">下 (Z-)</span>
+            </div>
+
+            {/* Center listener position */}
+            <div className="listener-position" />
+            <div className="listener-head" />
+
+            {/* Current target position (shown after guess) */}
+            {showTarget && currentTrialData.target && (
+              <div
+                className="spatial-dot-3d spatial-dot-3d-target"
+                style={{
+                  ["--x" as string]: toCSSPosition(currentTrialData.target).x,
+                  ["--y" as string]: toCSSPosition(currentTrialData.target).y,
+                  ["--z" as string]: toCSSPosition(currentTrialData.target).z
+                }}
+                title="目标位置"
+              />
+            )}
+
+            {/* History dots from previous trials */}
+            {trials.map(
+              (trial, idx) =>
+                trial.userGuess &&
+                idx < currentTrial && (
+                  <div
+                    key={trial.id}
+                    className="spatial-dot-3d spatial-dot-3d-history"
+                    style={{
+                      ["--x" as string]: toCSSPosition(trial.userGuess).x,
+                      ["--y" as string]: toCSSPosition(trial.userGuess).y,
+                      ["--z" as string]: toCSSPosition(trial.userGuess).z
+                    }}
+                    title={`${DIMENSION_NAMES[trial.dimension]}: ${Math.round(trial.score || 0)}分`}
+                  />
+                )
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 渲染旋转控制按钮
+  function renderRotationControls() {
+    return (
+      <div className="soundfield-rotation-controls">
+        <button className="rotation-btn" onClick={() => setPresetView("front")}>正视图</button>
+        <button className="rotation-btn" onClick={() => setPresetView("back")}>后视图</button>
+        <button className="rotation-btn" onClick={() => setPresetView("left")}>左视图</button>
+        <button className="rotation-btn" onClick={() => setPresetView("right")}>右视图</button>
+        <button className="rotation-btn" onClick={() => setPresetView("top")}>俯视图</button>
+        <button className="rotation-btn" onClick={() => setPresetView("bottom")}>仰视图</button>
+        <button className="rotation-btn" onClick={() => setPresetView("iso")}>等轴测</button>
+      </div>
+    );
+  }
+
+  // 渲染Z轴滑块控制
+  function renderZControl() {
+    return (
+      <div className="soundfield-z-control">
+        <label>
+          <span style={{ fontWeight: 600, color: "#2f855a" }}>高度 (Z)</span>
+          <input
+            type="range"
+            min={-1}
+            max={1}
+            step={0.1}
+            value={tempZ}
+            onChange={(e) => setTempZ(parseFloat(e.target.value))}
+            disabled={!currentTarget || isPlaying}
+          />
+          <span className="z-value">{tempZ.toFixed(1)}</span>
+        </label>
+      </div>
+    );
+  }
+
   // 渲染模式选择标签
   function renderModeTabs() {
     const modes: { key: typeof mode; label: string; desc: string }[] = [
-      { key: "positioning", label: "定点定位", desc: "在2D平面上标记声音来源位置" },
+      { key: "positioning", label: "定点定位", desc: "在3D空间中标记声音来源位置" },
       { key: "abx", label: "AB测试", desc: "辨别哪个声场更开阔" },
       { key: "continuous", label: "连续听音", desc: "聆听后对各维度评分" }
     ];
@@ -168,34 +458,10 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
           )}
         </div>
 
-        <div
-          className="spatial-arena2d soundfield-arena"
-          onClick={handleArenaClick}
-          style={{ cursor: currentTarget ? "crosshair" : "default" }}
-        >
-          <div className="spatial-self-2d" />
-          <div className="plane-axis-x" />
-          <div className="plane-axis-y" />
-
-          {/* 显示历史点 */}
-          {trials.map(
-            (trial, idx) =>
-              trial.userGuess &&
-              idx < currentTrial && (
-                <div
-                  key={trial.id}
-                  className="spatial-dot spatial-user"
-                  style={{
-                    left: `${((trial.userGuess.x + 1) / 2) * 100}%`,
-                    top: `${(1 - (trial.userGuess.y + 1) / 2) * 100}%`,
-                    opacity: 0.4,
-                    transform: "translate(-50%, -50%) scale(0.7)"
-                  }}
-                  title={`${DIMENSION_NAMES[trial.dimension]}: ${Math.round(trial.score || 0)}分`}
-                />
-              )
-          )}
-        </div>
+        {/* 3D 空间场景 */}
+        {render3DScene()}
+        {renderRotationControls()}
+        {renderZControl()}
 
         <div className="soundfield-controls row">
           <button disabled={busy || isPlaying || !currentTarget} onClick={() => playTestTone()}>
@@ -203,7 +469,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
           </button>
         </div>
 
-        <p className="hint">点击上方区域标记您感知到的声音位置</p>
+        <p className="hint">点击立方体表面标记3D位置，或拖拽旋转视角 | 使用高度滑块调整Z轴</p>
       </div>
     );
   }
