@@ -172,6 +172,36 @@ export function computeOverallResult(trials: ImageSizeTrial[]): ImageSizeOverall
 }
 
 /**
+ * 生成稳定的双频波形（440Hz 三角波 + 442Hz 正弦波）
+ * 使用 AudioBuffer 固定相位，避免 OscillatorNode 的随机相位问题
+ */
+function createDualToneBuffer(ctx: AudioContext, duration: number): AudioBuffer {
+  const sampleRate = ctx.sampleRate;
+  const length = Math.ceil(duration * sampleRate);
+  const buffer = ctx.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+
+  const freq1 = 440; // 三角波频率
+  const freq2 = 442; // 正弦波频率
+
+  for (let i = 0; i < length; i++) {
+    const t = i / sampleRate;
+
+    // 440Hz 三角波 (幅度 0.6)
+    const phase1 = (t * freq1) % 1;
+    const triangle = phase1 < 0.5 ? (4 * phase1 - 1) : (3 - 4 * phase1);
+
+    // 442Hz 正弦波 (幅度 0.4)
+    const sine = Math.sin(2 * Math.PI * freq2 * t);
+
+    // 混合波形
+    data[i] = triangle * 0.6 + sine * 0.4;
+  }
+
+  return buffer;
+}
+
+/**
  * 创建带有指定结像大小的音频
  * @param ctx AudioContext
  * @param size 结像大小 (0.0 - 1.0)
@@ -186,18 +216,13 @@ export function createImageSizeTone(
   const now = ctx.currentTime;
   const endTime = now + durationSec;
 
-  // 使用三角波 + 正弦波合成温暖音色
-  const osc1 = ctx.createOscillator();
-  osc1.type = 'triangle';
-  osc1.frequency.value = 440; // A4
-
-  const osc2 = ctx.createOscillator();
-  osc2.type = 'sine';
-  osc2.frequency.value = 442; // 轻微失谐增加宽度感
+  // 使用 AudioBufferSourceNode 播放预生成的稳定波形
+  const buffer = createDualToneBuffer(ctx, durationSec + 0.1); // 稍微长一点避免边界问题
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
 
   // 增益控制
-  const gain1 = ctx.createGain();
-  const gain2 = ctx.createGain();
+  const gain = ctx.createGain();
 
   // 立体声合并器
   const merger = ctx.createChannelMerger(2);
@@ -210,69 +235,45 @@ export function createImageSizeTone(
   // 计算左右声道增益
   // 当 width=0: left=0.5, right=0.5（单声道）
   // 当 width=1: left=0.9, right=0.1（最大宽度，但保留一些交叉避免完全分离）
-  const leftGain1 = 0.5 + width * 0.4;
-  const rightGain1 = 0.5 - width * 0.4;
-  const leftGain2 = 0.5 - width * 0.4;
-  const rightGain2 = 0.5 + width * 0.4;
+  const leftGain = 0.5 + width * 0.4;
+  const rightGain = 0.5 - width * 0.4;
 
-  // 设置增益值
-  gain1.gain.setValueAtTime(0, now);
-  gain1.gain.linearRampToValueAtTime(0.3, now + FADE_IN_SEC);
-  gain1.gain.setValueAtTime(0.3, endTime - FADE_OUT_SEC);
-  gain1.gain.linearRampToValueAtTime(0, endTime);
-
-  gain2.gain.setValueAtTime(0, now);
-  gain2.gain.linearRampToValueAtTime(0.2, now + FADE_IN_SEC);
-  gain2.gain.setValueAtTime(0.2, endTime - FADE_OUT_SEC);
-  gain2.gain.linearRampToValueAtTime(0, endTime);
+  // 设置增益值（ADSR包络）
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.5, now + FADE_IN_SEC);
+  gain.gain.setValueAtTime(0.5, endTime - FADE_OUT_SEC);
+  gain.gain.linearRampToValueAtTime(0, endTime);
 
   // 创建左右声道增益节点
   const leftGainNode = ctx.createGain();
   const rightGainNode = ctx.createGain();
 
-  leftGainNode.gain.value = leftGain1;
-  rightGainNode.gain.value = rightGain1;
+  leftGainNode.gain.value = leftGain;
+  rightGainNode.gain.value = rightGain;
 
-  // 第二个振荡器的左右增益（反相）
-  const leftGainNode2 = ctx.createGain();
-  const rightGainNode2 = ctx.createGain();
-
-  leftGainNode2.gain.value = leftGain2;
-  rightGainNode2.gain.value = rightGain2;
-
-  // 连接：osc1 -> gain1 -> 左右增益 -> merger
-  osc1.connect(gain1);
-  gain1.connect(leftGainNode);
-  gain1.connect(rightGainNode);
+  // 连接：source -> gain -> 左右增益 -> merger
+  source.connect(gain);
+  gain.connect(leftGainNode);
+  gain.connect(rightGainNode);
   leftGainNode.connect(merger, 0, 0);
   rightGainNode.connect(merger, 0, 1);
-
-  // 连接：osc2 -> gain2 -> 左右增益2 -> merger
-  osc2.connect(gain2);
-  gain2.connect(leftGainNode2);
-  gain2.connect(rightGainNode2);
-  leftGainNode2.connect(merger, 0, 0);
-  rightGainNode2.connect(merger, 0, 1);
 
   // 连接到输出
   merger.connect(ctx.destination);
 
-  // 启动振荡器
-  osc1.start(now);
-  osc2.start(now);
-  osc1.stop(endTime);
-  osc2.stop(endTime);
+  // 启动播放
+  source.start(now);
+  source.stop(endTime);
 
   const nodes: AudioNode[] = [
-    osc1, osc2, gain1, gain2,
-    leftGainNode, rightGainNode, leftGainNode2, rightGainNode2,
+    source, gain,
+    leftGainNode, rightGainNode,
     merger
   ];
 
   const stop = () => {
     try {
-      osc1.stop();
-      osc2.stop();
+      source.stop();
     } catch {
       // noop
     }
