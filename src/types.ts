@@ -279,3 +279,17 @@ export type DensityTestConfig = {
   tone_amplitude?: number;
   seed?: number;
 };
+
+export type {
+  InteractiveAnswerInput,
+  InteractiveChoice,
+  InteractiveConceptDefinition,
+  InteractiveConceptId,
+  InteractiveConceptMetrics,
+  InteractiveConceptResult,
+  InteractiveSessionMode,
+  InteractiveSuitePhase,
+  InteractiveTrial,
+  InteractiveTrialResult,
+  PlaybackVariant
+} from "./concept-interactive/types";

@@ -12,15 +12,16 @@ import { api } from "./api";
 import { BassReboundStage } from "./components/BassReboundStage";
 import { HearingSweepStage } from "./components/HearingSweepStage";
 import { ImageSizeStage } from "./components/ImageSizeStage";
+import { InteractiveConceptStage } from "./components/InteractiveConceptStage";
 import { SoundFieldStage } from "./components/SoundFieldStage";
 import { SpatialStage } from "./components/SpatialStage";
 import { useSpatialTest } from "./spatial/useSpatialTest";
 import type {
   CalibrationSession,
   ChannelAcquisitionConfig,
-  ConceptTestResult,
   DeviceInfo,
   ExportResult,
+  InteractiveConceptId,
   ProjectSummary,
   SaveResult,
   ScoreResult,
@@ -44,6 +45,17 @@ type Stage =
   | "image-size"
   | "concept-tests";
 
+const CONCEPT_LABELS: Record<InteractiveConceptId, string> = {
+  ild: "左右耳声压差",
+  bass_extension: "低频下潜",
+  treble_extension: "高频延伸",
+  resolution: "解析",
+  separation: "分离",
+  transient: "瞬态",
+  dynamic: "动态",
+  density: "密度"
+};
+
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -54,7 +66,7 @@ export default function App() {
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [history, setHistory] = useState<ProjectSummary[]>([]);
-  const [conceptResults, setConceptResults] = useState<ConceptTestResult[]>([]);
+  const [conceptInitial, setConceptInitial] = useState<InteractiveConceptId | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("准备开始测试");
   const [sweepAcq, setSweepAcq] = useState<SweepAcquisitionConfig>({
@@ -263,70 +275,14 @@ export default function App() {
     }
   }
 
-  function upsertConceptResult(next: ConceptTestResult) {
-    setConceptResults((prev) => {
-      const idx = prev.findIndex((x) => x.concept === next.concept);
-      if (idx < 0) return [...prev, next];
-      const updated = [...prev];
-      updated[idx] = next;
-      return updated;
-    });
-  }
-
-  async function runConceptTest(
-    label: string,
-    runner: () => Promise<ConceptTestResult>
-  ) {
-    setBusy(true);
-    setStatus(`执行 ${label}...`);
-    try {
-      const result = await runner();
-      upsertConceptResult(result);
-      setStatus(`${label} 完成，得分 ${result.score.toFixed(1)}`);
-    } catch (error) {
-      setStatus(`${label} 失败: ${String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function runAllConceptTests() {
-    setBusy(true);
-    setStatus("开始执行八项声学能力测试...");
-    try {
-      const runners: Array<{ label: string; fn: () => Promise<ConceptTestResult> }> = [
-        { label: "左右耳声压差", fn: () => api.runIldTest({ repeats: 3 }) },
-        { label: "低频下潜", fn: () => api.runBassExtensionTest({ repeats: 3 }) },
-        { label: "高频延伸", fn: () => api.runTrebleExtensionTest({ repeats: 3 }) },
-        { label: "解析", fn: () => Promise.resolve(api.runResolutionTest({ trials_per_snr: 10 })) },
-        { label: "分离", fn: () => api.runSeparationTest({ repeats: 3 }) },
-        { label: "瞬态", fn: () => api.runTransientTest({ repeats: 3 }) },
-        { label: "动态", fn: () => api.runDynamicRangeTest({}) },
-        { label: "密度", fn: () => api.runDensityTest({ subjective_density_10: 7 }) }
-      ];
-
-      const collected: ConceptTestResult[] = [];
-      for (const item of runners) {
-        setStatus(`执行 ${item.label}...`);
-        const result = await item.fn();
-        collected.push(result);
-      }
-      setConceptResults(collected);
-      const avg = collected.reduce((acc, it) => acc + it.score, 0) / Math.max(collected.length, 1);
-      setStatus(`八项测试完成，平均分 ${avg.toFixed(1)}`);
-    } catch (error) {
-      setStatus(`八项测试失败: ${String(error)}`);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function openConceptTestsAndRun(
-    label: string,
-    runner: () => Promise<ConceptTestResult>
-  ) {
+  function openConceptTests(conceptId: InteractiveConceptId | null = null) {
+    setConceptInitial(conceptId);
     setStage("concept-tests");
-    void runConceptTest(label, runner);
+    setStatus(
+      conceptId
+        ? `进入交互式测试：${CONCEPT_LABELS[conceptId]}`
+        : "进入交互式八项声学能力测试"
+    );
   }
 
   return (
@@ -407,60 +363,56 @@ export default function App() {
                 空间结像大小测试
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() => openConceptTestsAndRun("左右耳声压差", () => api.runIldTest({ repeats: 3 }))}
+                disabled={busy}
+                onClick={() => openConceptTests(null)}
+              >
+                交互式八项闯关
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => openConceptTests("ild")}
               >
                 左右耳声压差
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() => openConceptTestsAndRun("低频下潜", () => api.runBassExtensionTest({ repeats: 3 }))}
+                disabled={busy}
+                onClick={() => openConceptTests("bass_extension")}
               >
                 低频下潜
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() => openConceptTestsAndRun("高频延伸", () => api.runTrebleExtensionTest({ repeats: 3 }))}
+                disabled={busy}
+                onClick={() => openConceptTests("treble_extension")}
               >
                 高频延伸
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() =>
-                  openConceptTestsAndRun("解析", () => Promise.resolve(api.runResolutionTest({ trials_per_snr: 10 })))
-                }
+                disabled={busy}
+                onClick={() => openConceptTests("resolution")}
               >
                 解析
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() => openConceptTestsAndRun("分离", () => api.runSeparationTest({ repeats: 3 }))}
+                disabled={busy}
+                onClick={() => openConceptTests("separation")}
               >
                 分离
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() => openConceptTestsAndRun("瞬态", () => api.runTransientTest({ repeats: 3 }))}
+                disabled={busy}
+                onClick={() => openConceptTests("transient")}
               >
                 瞬态
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() => openConceptTestsAndRun("动态", () => api.runDynamicRangeTest({}))}
+                disabled={busy}
+                onClick={() => openConceptTests("dynamic")}
               >
                 动态
               </button>
               <button
-                disabled={busy || isWebDemo}
-                title={isWebDemo ? "该测试需要 Tauri 桌面版运行" : undefined}
-                onClick={() => openConceptTestsAndRun("密度", () => api.runDensityTest({ subjective_density_10: 7 }))}
+                disabled={busy}
+                onClick={() => openConceptTests("density")}
               >
                 密度
               </button>
@@ -549,103 +501,12 @@ export default function App() {
       )}
 
       {stage === "concept-tests" && (
-        <section className="grid">
-          <div className="card">
-            <h2>八项声学能力测试</h2>
-            <p className="hint">
-              包含：左右耳声压差、低频下潜、高频延伸、解析、分离、瞬态、动态、密度。
-              {!calibration && " 当前未校准，将以模拟/低置信度方式运行客观项。"}
-            </p>
-            <div className="row">
-              <button disabled={busy} onClick={() => setStage("home")}>
-                返回首页
-              </button>
-              <button disabled={busy} onClick={runAllConceptTests}>
-                一键运行全部
-              </button>
-            </div>
-            <div className="row">
-              <button disabled={busy} onClick={() => runConceptTest("左右耳声压差", () => api.runIldTest({ repeats: 3 }))}>
-                左右耳声压差
-              </button>
-              <button disabled={busy} onClick={() => runConceptTest("低频下潜", () => api.runBassExtensionTest({ repeats: 3 }))}>
-                低频下潜
-              </button>
-              <button disabled={busy} onClick={() => runConceptTest("高频延伸", () => api.runTrebleExtensionTest({ repeats: 3 }))}>
-                高频延伸
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => runConceptTest("解析", () => Promise.resolve(api.runResolutionTest({ trials_per_snr: 10 })))}
-              >
-                解析
-              </button>
-              <button disabled={busy} onClick={() => runConceptTest("分离", () => api.runSeparationTest({ repeats: 3 }))}>
-                分离
-              </button>
-              <button disabled={busy} onClick={() => runConceptTest("瞬态", () => api.runTransientTest({ repeats: 3 }))}>
-                瞬态
-              </button>
-              <button disabled={busy} onClick={() => runConceptTest("动态", () => api.runDynamicRangeTest({}))}>
-                动态
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => runConceptTest("密度", () => api.runDensityTest({ subjective_density_10: 7 }))}
-              >
-                密度
-              </button>
-            </div>
-          </div>
-
-          <div className="card">
-            <h2>测试结果</h2>
-            {conceptResults.length === 0 && <p className="hint">还没有结果，先运行任一测试。</p>}
-            {conceptResults.length > 0 && (
-              <table>
-                <thead>
-                  <tr>
-                    <th>概念</th>
-                    <th>得分</th>
-                    <th>置信度</th>
-                    <th>备注</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {conceptResults
-                    .slice()
-                    .sort((a, b) => a.concept.localeCompare(b.concept))
-                    .map((item) => (
-                      <tr key={item.concept}>
-                        <td>{item.concept}</td>
-                        <td>{item.score.toFixed(1)}</td>
-                        <td>{item.low_confidence ? "低" : "高"}</td>
-                        <td>{item.notes[0] ?? "-"}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {conceptResults.length > 0 && (
-            <div className="card">
-              <h2>原始指标（JSON）</h2>
-              <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {JSON.stringify(
-                  conceptResults.map((x) => ({
-                    concept: x.concept,
-                    score: x.score,
-                    low_confidence: x.low_confidence,
-                    metrics: x.metrics
-                  })),
-                  null,
-                  2
-                )}
-              </pre>
-            </div>
-          )}
-        </section>
+        <InteractiveConceptStage
+          busy={busy}
+          setStatus={setStatus}
+          initialConcept={conceptInitial}
+          onBackHome={() => setStage("home")}
+        />
       )}
 
       {stage === "wizard" && (

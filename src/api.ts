@@ -51,20 +51,28 @@ export const api = {
     acquisition?: ChannelAcquisitionConfig;
   }) =>
     invoke<ChannelMatchResult>("run_channel_match_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runIldTest: (config: IldTestConfig = {}) =>
     invoke<ConceptTestResult>("run_ild_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runBassExtensionTest: (config: BassExtensionTestConfig = {}) =>
     invoke<ConceptTestResult>("run_bass_extension_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runTrebleExtensionTest: (config: TrebleExtensionTestConfig = {}) =>
     invoke<ConceptTestResult>("run_treble_extension_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runResolutionTest: (config: ResolutionTestConfig = {}) =>
     invoke<ConceptTestResult>("run_resolution_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runSeparationTest: (config: SeparationTestConfig = {}) =>
     invoke<ConceptTestResult>("run_separation_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runTransientTest: (config: TransientTestConfig = {}) =>
     invoke<ConceptTestResult>("run_transient_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runDynamicRangeTest: (config: DynamicRangeTestConfig = {}) =>
     invoke<ConceptTestResult>("run_dynamic_range_test", { config }),
+  // @deprecated Interactive concept tests now run fully on frontend Web Audio.
   runDensityTest: (config: DensityTestConfig = {}) =>
     invoke<ConceptTestResult>("run_density_test", { config }),
   computeScore: (input: {

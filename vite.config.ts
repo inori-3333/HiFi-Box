@@ -17,6 +17,11 @@ export default defineConfig({
   base: resolveBasePath(),
   plugins: [react()],
   clearScreen: false,
+  test: {
+    globals: true,
+    environment: "jsdom",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  },
   server: {
     host: "127.0.0.1",
     port: 1420,
