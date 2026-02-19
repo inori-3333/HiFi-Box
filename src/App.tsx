@@ -254,7 +254,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <h1>HiFi-Box</h1>
+        <h1>Inori&MoonCatのSound Box</h1>
         <p>耳机测试与量化工具箱 V1</p>
       </header>
 
