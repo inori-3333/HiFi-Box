@@ -30,7 +30,7 @@ const SAMPLE_RATE = 48_000;
 const APP_VERSION = "0.1.0";
 const IS_TAURI_RUNTIME = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-type Stage = "home" | "wizard" | "result" | "spatial" | "hearing-sweep" | "bass-rebound" | "soundfield";
+type Stage = "home" | "wizard" | "result" | "spatial-select" | "spatial" | "hearing-sweep" | "bass-rebound" | "soundfield";
 
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
@@ -282,11 +282,14 @@ export default function App() {
                   新建测试
                 </button>
               )}
-              <button disabled={busy} onClick={() => spatial.startSpatialTest("2d")}>
-                空间结像测试(2D)
-              </button>
-              <button disabled={busy} onClick={() => spatial.startSpatialTest("3d")}>
-                空间结像测试(3D)
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setStage("spatial-select");
+                  setStatus("请选择空间结像测试模式");
+                }}
+              >
+                空间结像位置测试
               </button>
               <button
                 disabled={busy}
@@ -341,6 +344,41 @@ export default function App() {
               ))}
             </div>
           )}
+        </section>
+      )}
+
+      {stage === "spatial-select" && (
+        <section className="grid">
+          <div className="card">
+            <h2>空间结像位置测试</h2>
+            <p>请选择测试模式：</p>
+            <div className="row">
+              <button
+                disabled={busy}
+                onClick={() => {
+                  spatial.startSpatialTest("2d");
+                }}
+              >
+                2D 模式（平面）
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  spatial.startSpatialTest("3d");
+                }}
+              >
+                3D 模式（立体空间）
+              </button>
+              <button disabled={busy} onClick={() => setStage("home")}>
+                返回首页
+              </button>
+            </div>
+            <p className="hint">
+              2D 模式：在 XY 平面进行测试，适合音响摆放位置判断。
+              <br />
+              3D 模式：在 XYZ 立体空间进行测试，适合耳机环绕声定位。
+            </p>
+          </div>
         </section>
       )}
 
