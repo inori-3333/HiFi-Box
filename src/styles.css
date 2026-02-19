@@ -1298,6 +1298,148 @@ td {
   background: #d4edda;
 }
 
+/* ===== 一维坐标轴可视化样式 ===== */
+.axis-selection-section {
+  margin: 16px 0;
+  padding: 16px;
+  background: #f9fff8;
+  border: 1px solid #c4ddbc;
+  border-radius: 10px;
+}
+
+.axis-selection-section h4 {
+  margin: 0 0 16px 0;
+  color: #3f5f36;
+  font-size: 15px;
+}
+
+.axis-visuals-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.axis-visual-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.axis-visual-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.axis-visual-line {
+  position: relative;
+  height: 40px;
+  background: #f4fbee;
+  border-radius: 8px;
+  padding: 0 12px;
+}
+
+.axis-visual-line.interactive:hover {
+  background: #e8f5e9;
+}
+
+.axis-visual-track {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  right: 12px;
+  height: 6px;
+  transform: translateY(-50%);
+  border-radius: 3px;
+}
+
+.axis-visual-center-mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.axis-visual-ticks {
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-top: 4px;
+  pointer-events: none;
+}
+
+.axis-visual-ticks span {
+  font-size: 11px;
+  color: #666;
+}
+
+.axis-visual-handle {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  z-index: 2;
+  transition: transform 0.1s;
+}
+
+.axis-visual-line.interactive:hover .axis-visual-handle {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.axis-visual-marker-line {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.axis-visual-endpoints {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #666;
+  padding: 0 4px;
+}
+
+.axis-visual-value {
+  font-weight: 600;
+  font-family: monospace;
+  font-size: 14px;
+}
+
+/* 3D场景只读标记 */
+.soundfield-3d-container.readonly {
+  position: relative;
+}
+
+.scene-readonly-label {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  color: #666;
+  border: 1px solid #ddd;
+  z-index: 10;
+}
+
 /* 响应式调整 */
 @media (max-width: 640px) {
   .axis-slider-row {
@@ -1330,11 +1472,146 @@ td {
   .phase-label {
     font-size: 10px;
   }
+
+  .axis-visual-line {
+    height: 36px;
+  }
+
+  .axis-visual-handle {
+    width: 14px;
+    height: 14px;
+  }
 }
 
 /* ===== Image Size Test Styles ===== */
 .image-size-card {
   max-width: 760px;
+}
+
+/* 题目进度指示器 */
+.trial-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 12px 16px;
+  background: #f4fbee;
+  border-radius: 8px;
+  border: 1px solid #d5e6d1;
+}
+
+.trial-progress-label {
+  font-size: 14px;
+  color: #3f5f36;
+  font-weight: 500;
+}
+
+.trial-progress-dots {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+}
+
+.trial-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+
+.trial-dot.pending {
+  background: #e0e0e0;
+  color: #999;
+  border: 2px solid #d0d0d0;
+}
+
+.trial-dot.current {
+  background: #2f7142;
+  color: white;
+  border: 2px solid #2f7142;
+  box-shadow: 0 0 8px rgba(47, 113, 66, 0.4);
+  animation: pulse-dot 1.5s infinite;
+}
+
+.trial-dot.completed {
+  background: #4caf50;
+  color: white;
+  border: 2px solid #4caf50;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.trial-progress-text {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+/* 各题详情列表 */
+.trials-details {
+  margin: 20px 0;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
+}
+
+.trials-details h4 {
+  margin: 0 0 12px 0;
+  color: #3f5f36;
+  font-size: 14px;
+}
+
+.trials-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trial-detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.trial-detail-item .trial-number {
+  color: #666;
+  min-width: 50px;
+}
+
+.trial-detail-item .trial-score {
+  font-weight: 600;
+  color: #2f7142;
+}
+
+.trial-detail-item .trial-error {
+  color: #999;
+  font-size: 12px;
+}
+
+/* 单题结果 */
+.image-size-result.single-trial {
+  border: 1px solid #c4ddbc;
+}
+
+.image-size-result .primary-btn {
+  background: #1976d2;
+  padding: 12px 32px;
+}
+
+.image-size-result .primary-btn:hover {
+  background: #1565c0;
 }
 
 .image-size-controls {

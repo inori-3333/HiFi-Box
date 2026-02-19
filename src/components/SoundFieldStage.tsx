@@ -126,64 +126,23 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     setIsDragging(false);
   }, []);
 
-  // Handle click on 3D cube face (新定点定位模式)
-  const handleCubeFaceClick = useCallback((face: string, e: React.MouseEvent<HTMLDivElement>) => {
-    if (mode !== "positioning") return;
+  // 处理一维坐标轴点击/拖动
+  const handleAxisClick = useCallback((axis: 'x' | 'y' | 'z', e: React.MouseEvent<HTMLDivElement>) => {
     if (!positioningSession) return;
     if (positioningPhase !== "guessing" && positioningPhase !== "playing") return;
-    if (isDragging) return; // Don't process click if we were dragging
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const u = (e.clientX - rect.left) / rect.width; // 0 to 1 (left to right)
-    const v = (e.clientY - rect.top) / rect.height; // 0 to 1 (top to bottom)
+    const x = (e.clientX - rect.left) / rect.width; // 0 to 1
+    const value = Math.max(-1, Math.min(1, (x - 0.5) * 2)); // 转换为 -1 到 1
 
-    // Convert to -1 to 1 range
-    const nu = (u - 0.5) * 2;
-    const nv = -(v - 0.5) * 2; // Invert Y so positive is up
-
-    let x = currentGuess.x;
-    let y = currentGuess.y;
-    let z = currentGuess.z;
-
-    switch (face) {
-      case 'front': // Y+ plane
-        x = nu;
-        y = 1;
-        z = nv;
-        break;
-      case 'back': // Y- plane
-        x = -nu;
-        y = -1;
-        z = nv;
-        break;
-      case 'right': // X+ plane
-        x = 1;
-        y = nu;
-        z = nv;
-        break;
-      case 'left': // X- plane
-        x = -1;
-        y = -nu;
-        z = nv;
-        break;
-      case 'top': // Z+ plane
-        x = nu;
-        y = nv;
-        z = 1;
-        break;
-      case 'bottom': // Z- plane
-        x = nu;
-        y = nv;
-        z = -1;
-        break;
+    if (axis === 'x') {
+      updateGuess(value, currentGuess.y, currentGuess.z);
+    } else if (axis === 'y') {
+      updateGuess(currentGuess.x, value, currentGuess.z);
+    } else {
+      updateGuess(currentGuess.x, currentGuess.y, value);
     }
-
-    updateGuess(
-      Math.max(-1, Math.min(1, x)),
-      Math.max(-1, Math.min(1, y)),
-      Math.max(-1, Math.min(1, z))
-    );
-  }, [mode, positioningSession, positioningPhase, isDragging, currentGuess, updateGuess]);
+  }, [positioningSession, positioningPhase, currentGuess, updateGuess]);
 
   // Preset rotation views
   const setPresetView = useCallback((view: string) => {
@@ -226,12 +185,76 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     }
   }
 
-  // 渲染3D场景（新定点定位模式）
+  // 渲染一维坐标轴可视化
+  function render1DAxisVisuals() {
+    const hasSession = positioningSession !== null;
+    const canAdjust = hasSession && (positioningPhase === "guessing" || positioningPhase === "playing");
+
+    const axes = [
+      { key: 'x', label: 'X (左右)', left: '左', right: '右', color: '#c53030', value: currentGuess.x },
+      { key: 'y', label: 'Y (前后)', left: '后', right: '前', color: '#2b6cb0', value: currentGuess.y },
+      { key: 'z', label: 'Z (上下)', left: '下', right: '上', color: '#2f855a', value: currentGuess.z }
+    ] as const;
+
+    return (
+      <div className="axis-visuals-container">
+        {axes.map((axis) => (
+          <div key={axis.key} className="axis-visual-row">
+            <span className="axis-visual-label" style={{ color: axis.color }}>
+              {axis.label}
+            </span>
+            <div
+              className={`axis-visual-line ${canAdjust ? 'interactive' : 'readonly'}`}
+              onClick={(e) => handleAxisClick(axis.key, e)}
+              style={{ cursor: canAdjust ? 'pointer' : 'default' }}
+            >
+              <div className="axis-visual-track" style={{ backgroundColor: `${axis.color}30` }} />
+              <div className="axis-visual-center-mark" />
+              <div className="axis-visual-ticks">
+                <span>-1</span>
+                <span>-0.5</span>
+                <span>0</span>
+                <span>0.5</span>
+                <span>+1</span>
+              </div>
+              {/* 当前位置指示点 */}
+              <div
+                className="axis-visual-handle"
+                style={{
+                  left: `${(axis.value + 1) * 50}%`,
+                  backgroundColor: axis.color,
+                  transform: 'translateX(-50%)'
+                }}
+              />
+              {/* 当前位置标记线 */}
+              <div
+                className="axis-visual-marker-line"
+                style={{
+                  left: `${(axis.value + 1) * 50}%`,
+                  backgroundColor: axis.color
+                }}
+              />
+            </div>
+            <div className="axis-visual-endpoints">
+              <span>{axis.left}</span>
+              <span className="axis-visual-value" style={{ color: axis.color }}>
+                {axis.value.toFixed(2)}
+              </span>
+              <span>{axis.right}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // 渲染3D场景（新定点定位模式 - 只读显示）
   function render3DScene() {
     const hasSession = positioningSession !== null;
 
     return (
-      <div className="soundfield-3d-container">
+      <div className="soundfield-3d-container readonly">
+        <div className="scene-readonly-label">3D空间示意图（仅显示）</div>
         <div
           ref={sceneRef}
           className={`soundfield-3d-scene ${isDragging ? "dragging" : ""}`}
@@ -247,8 +270,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             {/* Front face (Y+) */}
             <div
               className="cube-face cube-face-front"
-              onClick={(e) => handleCubeFaceClick("front", e)}
-              title="点击标记位置"
+              title="3D空间示意图"
             >
               <div className="cube-grid" />
               <div className="cube-axis-x" />
@@ -259,8 +281,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             {/* Back face (Y-) */}
             <div
               className="cube-face cube-face-back"
-              onClick={(e) => handleCubeFaceClick("back", e)}
-              title="点击标记位置"
+              title="3D空间示意图"
             >
               <div className="cube-grid" />
               <div className="cube-axis-x" />
@@ -271,8 +292,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             {/* Right face (X+) */}
             <div
               className="cube-face cube-face-right"
-              onClick={(e) => handleCubeFaceClick("right", e)}
-              title="点击标记位置"
+              title="3D空间示意图"
             >
               <div className="cube-grid" />
               <div className="cube-axis-x" />
@@ -283,8 +303,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             {/* Left face (X-) */}
             <div
               className="cube-face cube-face-left"
-              onClick={(e) => handleCubeFaceClick("left", e)}
-              title="点击标记位置"
+              title="3D空间示意图"
             >
               <div className="cube-grid" />
               <div className="cube-axis-x" />
@@ -295,8 +314,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             {/* Top face (Z+) */}
             <div
               className="cube-face cube-face-top"
-              onClick={(e) => handleCubeFaceClick("top", e)}
-              title="点击标记位置"
+              title="3D空间示意图"
             >
               <div className="cube-grid" />
               <div className="cube-axis-x" />
@@ -307,8 +325,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             {/* Bottom face (Z-) */}
             <div
               className="cube-face cube-face-bottom"
-              onClick={(e) => handleCubeFaceClick("bottom", e)}
-              title="点击标记位置"
+              title="3D空间示意图"
             >
               <div className="cube-grid" />
               <div className="cube-axis-x" />
@@ -627,15 +644,27 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
         {/* 阶段指示器 */}
         {renderPhaseIndicator()}
 
-        {/* 3D 空间场景 */}
-        {render3DScene()}
-        {renderRotationControls()}
-
         {/* 校准阶段UI */}
         {renderCalibrationPhase()}
 
-        {/* XYZ滑块控制 */}
-        {renderXYZControls()}
+        {/* 一维坐标轴可视化选点 */}
+        {(positioningPhase === "guessing" || positioningPhase === "playing" || positioningPhase === "saved") && hasSession && (
+          <div className="axis-selection-section">
+            <h4>请在各坐标轴上选择感知位置：</h4>
+            {render1DAxisVisuals()}
+          </div>
+        )}
+
+        {/* 3D 空间场景 - 仅显示 */}
+        {hasSession && (
+          <>
+            {render3DScene()}
+            {renderRotationControls()}
+          </>
+        )}
+
+        {/* XYZ滑块控制（作为备选精确调整） */}
+        {(positioningPhase === "guessing" || positioningPhase === "playing") && renderXYZControls()}
 
         {/* 控制按钮区域 */}
         <div className="soundfield-positioning-controls">

@@ -15,6 +15,24 @@ export type ImageSizeTrial = {
   error?: number;          // 误差值
 };
 
+// 多道题目的会话
+export type ImageSizeSession = {
+  sessionId: string;
+  trials: ImageSizeTrial[];    // 所有题目
+  currentTrial: number;        // 当前题目索引
+  totalTrials: number;         // 总题数
+  isCompleted: boolean;        // 是否全部完成
+};
+
+// 多题结果汇总
+export type ImageSizeOverallResult = {
+  averageScore: number;
+  totalError: number;
+  bestTrial: number;
+  worstTrial: number;
+  trials: ImageSizeTrial[];
+};
+
 const REFERENCE_SIZE = 0.5;  // 基准音固定为中等大小
 const TONE_DURATION_SEC = 1.5;  // 每个音持续1.5秒
 const FADE_IN_SEC = 0.05;
@@ -50,6 +68,64 @@ export function computeImageSizeScore(targetSize: number, userSize: number): num
  */
 export function generateTargetSize(): number {
   return 0.15 + Math.random() * 0.7;
+}
+
+/**
+ * 生成多道题目的会话
+ * @param totalTrials 题目数量（默认5道）
+ */
+export function generateImageSizeSession(totalTrials: number = 5): ImageSizeSession {
+  const trials: ImageSizeTrial[] = [];
+  for (let i = 0; i < totalTrials; i++) {
+    trials.push({
+      id: i + 1,
+      targetSize: generateTargetSize()
+    });
+  }
+
+  return {
+    sessionId: Date.now().toString(),
+    trials,
+    currentTrial: 0,
+    totalTrials,
+    isCompleted: false
+  };
+}
+
+/**
+ * 计算多道题的综合结果
+ */
+export function computeOverallResult(trials: ImageSizeTrial[]): ImageSizeOverallResult {
+  const completedTrials = trials.filter(t => t.score !== undefined);
+
+  if (completedTrials.length === 0) {
+    return {
+      averageScore: 0,
+      totalError: 0,
+      bestTrial: 0,
+      worstTrial: 0,
+      trials
+    };
+  }
+
+  const scores = completedTrials.map(t => t.score!);
+  const errors = completedTrials.map(t => t.error!);
+
+  const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+  const totalError = errors.reduce((a, b) => a + b, 0);
+
+  const bestScore = Math.max(...scores);
+  const worstScore = Math.min(...scores);
+  const bestTrial = completedTrials.find(t => t.score === bestScore)?.id || 1;
+  const worstTrial = completedTrials.find(t => t.score === worstScore)?.id || 1;
+
+  return {
+    averageScore: Math.round(averageScore * 10) / 10,
+    totalError: Math.round(totalError * 100) / 100,
+    bestTrial,
+    worstTrial,
+    trials
+  };
 }
 
 /**

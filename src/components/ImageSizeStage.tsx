@@ -7,22 +7,27 @@ type ImageSizeStageProps = {
   onBackHome: () => void;
 };
 
+const TOTAL_TRIALS = 5;
+
 export function ImageSizeStage(props: ImageSizeStageProps) {
   const { busy, setStatus, onBackHome } = props;
   const test = useImageSizeTest({ setStatus });
   const {
     phase,
-    targetSize,
+    session,
+    currentTrial,
     userSize,
     score,
     error,
     isPlayingReference,
     isPlayingTest,
-    trialCount,
+    overallResult,
     setUserSize,
     playReference,
     startTest,
+    replayTestTone,
     submitAnswer,
+    nextTrial,
     resetTest
   } = test;
 
@@ -34,8 +39,16 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
     await startTest();
   }
 
+  async function handleReplayTest() {
+    await replayTestTone();
+  }
+
   function handleSubmitAnswer() {
     submitAnswer();
+  }
+
+  function handleNextTrial() {
+    void nextTrial();
   }
 
   function handleResetTest() {
@@ -55,6 +68,39 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
     if (size <= 0.65) return "较大";
     if (size <= 0.85) return "很大";
     return "最大（弥漫）";
+  }
+
+  // 渲染题目进度指示器
+  function renderTrialProgress() {
+    if (!session) return null;
+
+    return (
+      <div className="trial-progress">
+        <span className="trial-progress-label">题目进度:</span>
+        <div className="trial-progress-dots">
+          {session.trials.map((trial, idx) => (
+            <div
+              key={trial.id}
+              className={`trial-dot ${
+                idx < session.currentTrial
+                  ? 'completed'
+                  : idx === session.currentTrial
+                    ? 'current'
+                    : 'pending'
+              }`}
+              title={idx < session.currentTrial ? `第${idx + 1}题已完成` : `第${idx + 1}题`}
+            >
+              {idx < session.currentTrial ? '✓' : idx + 1}
+            </div>
+          ))}
+        </div>
+        <span className="trial-progress-text">
+          {phase === "completed"
+            ? `已完成 ${TOTAL_TRIALS}/${TOTAL_TRIALS}`
+            : `第 ${session.currentTrial + 1}/${TOTAL_TRIALS} 题`}
+        </span>
+      </div>
+    );
   }
 
   // 获取得分评价
@@ -90,22 +136,33 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
           </button>
         </div>
 
+        {/* 题目进度 */}
+        {session && renderTrialProgress()}
+
         {/* 控制按钮区 */}
         <div className="row image-size-controls">
           <button
-            disabled={busy || isPlayingTest}
+            disabled={busy || isPlayingTest || phase === "completed"}
             onClick={handlePlayReference}
             className={isPlayingReference ? "active" : ""}
           >
             {isPlayingReference ? "播放中..." : "播放基准音"}
           </button>
           <button
-            disabled={busy || isPlayingReference}
+            disabled={busy || isPlayingReference || phase === "completed"}
             onClick={handleStartTest}
             className={isPlayingTest ? "active" : ""}
           >
-            {isPlayingTest ? "测试中..." : trialCount > 0 ? "开始新一轮" : "开始测试"}
+            {isPlayingTest ? "测试中..." : session ? "重新开始" : "开始测试"}
           </button>
+          {(phase === "playing-test" || phase === "ready-for-test") && (
+            <button
+              disabled={busy || isPlayingTest || isPlayingReference}
+              onClick={handleReplayTest}
+            >
+              {isPlayingTest ? "播放中..." : "重播测试音"}
+            </button>
+          )}
         </div>
 
         {/* 状态显示 */}
@@ -113,13 +170,10 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
           <p className="hint">
             当前状态: {phase === "idle" && "等待开始"}
             {phase === "playing-reference" && "播放基准音中..."}
-            {phase === "ready-for-test" && "基准音已播放，可以开始测试"}
+            {phase === "ready-for-test" && "基准音已播放，可以开始测试或重播"}
             {phase === "playing-test" && "播放测试音中，请仔细聆听..."}
             {phase === "completed" && "测试完成"}
           </p>
-          {trialCount > 0 && (
-            <p className="hint">已进行轮数: {trialCount}</p>
-          )}
         </div>
 
         {/* 滑杆控制（在播放基准音后或测试阶段显示） */}
@@ -169,11 +223,48 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
         )}
 
         {/* 结果显示 */}
-        {phase === "completed" && score !== null && (
+        {phase === "completed" && overallResult && (
           <div className="image-size-result">
             <div className="score-display">
+              <div className="score-value">{overallResult.averageScore.toFixed(1)}</div>
+              <div className="score-label">综合得分</div>
+            </div>
+
+            {/* 各题详情 */}
+            <div className="trials-details">
+              <h4>各题详情:</h4>
+              <div className="trials-list">
+                {overallResult.trials.map((trial) => (
+                  <div key={trial.id} className="trial-detail-item">
+                    <span className="trial-number">第{trial.id}题</span>
+                    <span className="trial-score">{trial.score?.toFixed(0)}分</span>
+                    <span className="trial-error">误差{(trial.error! * 100).toFixed(0)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="error-display">
+              <p>
+                总误差: <strong>{(overallResult.totalError * 100).toFixed(1)}%</strong>
+              </p>
+              <p>
+                最佳表现: 第{overallResult.bestTrial}题 | 需改进: 第{overallResult.worstTrial}题
+              </p>
+            </div>
+            <p className="assessment">{getScoreAssessment(overallResult.averageScore)}</p>
+            <div className="row">
+              <button onClick={handleResetTest}>再测一次</button>
+            </div>
+          </div>
+        )}
+
+        {/* 单题结果（未完成全部题目时显示当前题结果） */}
+        {phase !== "completed" && score !== null && currentTrial && (
+          <div className="image-size-result single-trial">
+            <div className="score-display">
               <div className="score-value">{score.toFixed(1)}</div>
-              <div className="score-label">得分</div>
+              <div className="score-label">本题记分</div>
             </div>
             <div className="error-display">
               <p>
@@ -184,14 +275,18 @@ export function ImageSizeStage(props: ImageSizeStageProps) {
                 {getSizeDescription(userSize)})
               </p>
               <p>
-                正确答案: <strong>{(targetSize * 100).toFixed(0)}%</strong> (
-                {getSizeDescription(targetSize)})
+                正确答案: <strong>{(currentTrial.targetSize * 100).toFixed(0)}%</strong> (
+                {getSizeDescription(currentTrial.targetSize)})
               </p>
             </div>
-            <p className="assessment">{getScoreAssessment(score)}</p>
-            <div className="row">
-              <button onClick={handleResetTest}>再测一次</button>
-            </div>
+
+            {session && session.currentTrial < TOTAL_TRIALS - 1 && (
+              <div className="row">
+                <button onClick={handleNextTrial} className="primary-btn">
+                  下一题
+                </button>
+              </div>
+            )}
           </div>
         )}
 
