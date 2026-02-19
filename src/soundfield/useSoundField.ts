@@ -6,7 +6,10 @@ import type {
   SoundFieldTrial,
   SoundFieldResult,
   ABXTrial,
-  ContinuousRating
+  ContinuousRating,
+  PositioningSession,
+  PositioningRound,
+  PositioningPhase
 } from "./soundfield-core";
 import {
   generateSoundFieldTargets,
@@ -16,7 +19,16 @@ import {
   playABXTone,
   playContinuousTone,
   computeOverallResult,
-  SOUNDFIELD_TRIALS_PER_DIMENSION
+  SOUNDFIELD_TRIALS_PER_DIMENSION,
+  generateRandomTarget,
+  calculateDistance,
+  calculateError,
+  playCalibrationTones,
+  playMelodyAtPosition,
+  playPositioningTone,
+  BENCHMARK_POINTS,
+  ROUND_COLORS,
+  delay
 } from "./soundfield-core";
 
 export type SoundFieldController = {
@@ -33,15 +45,33 @@ export type SoundFieldController = {
   continuousRatings: ContinuousRating[];
   results: SoundFieldResult | null;
   volume: number;
+  currentTarget: SoundFieldPoint | null;
+
+  // 新定点定位模式状态
+  positioningSession: PositioningSession | null;
+  positioningPhase: PositioningPhase;
+  currentGuess: SoundFieldPoint;
+  isCalibrating: boolean;
+  calibrationStep: number;
+  calibrationPoint: SoundFieldPoint | null;
 
   // 模式切换
   setMode: (mode: SoundFieldMode) => void;
   setVolume: (volume: number) => void;
 
-  // 定点定位模式
+  // 定点定位模式 - 旧接口（兼容）
   playTestTone: (point?: SoundFieldPoint) => Promise<void>;
   submitGuess: (guess: SoundFieldPoint) => void;
-  currentTarget: SoundFieldPoint | null;
+
+  // 新定点定位模式接口
+  startCalibration: () => Promise<void>;
+  playTestMelody: () => Promise<void>;
+  updateGuess: (x: number, y: number, z: number) => void;
+  saveRound: () => void;
+  startNewRound: () => void;
+  generateNewTarget: () => void;
+  toggleRoundVisibility: (roundId: number) => void;
+  replayBenchmarkTone: (index: number) => Promise<void>;
 
   // AB测试模式
   playABX: (type: "a" | "b") => Promise<void>;
@@ -88,10 +118,19 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
   // 结果
   const [results, setResults] = useState<SoundFieldResult | null>(null);
 
+  // 新定点定位模式状态
+  const [positioningSession, setPositioningSession] = useState<PositioningSession | null>(null);
+  const [positioningPhase, setPositioningPhase] = useState<PositioningPhase>("idle");
+  const [currentGuess, setCurrentGuess] = useState<SoundFieldPoint>({ x: 0, y: 0, z: 0 });
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [calibrationStep, setCalibrationStep] = useState(0);
+  const [calibrationPoint, setCalibrationPoint] = useState<SoundFieldPoint | null>(null);
+
   // 音频状态
   const [isPlaying, setIsPlaying] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentPlaybackRef = useRef<{ stop: () => void } | null>(null);
+  const abortCalibrationRef = useRef(false);
 
   // 计算总试次数
   const totalTrials = SOUNDFIELD_TRIALS_PER_DIMENSION * DIMENSIONS.length;
@@ -160,9 +199,17 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     setAbxCorrect(0);
 
     if (mode === "positioning") {
-      generateAllTrials();
-      setCurrentTrial(0);
-      setStatus(`声场测试开始 - 第 1/${totalTrials} 试次`);
+      // 新定点定位模式：初始化session并开始校准
+      const newTarget = generateRandomTarget();
+      setPositioningSession({
+        sessionId: Date.now().toString(),
+        target: newTarget,
+        rounds: [],
+        currentRound: 0
+      });
+      setCurrentGuess({ x: 0, y: 0, z: 0 });
+      setPositioningPhase("idle");
+      setStatus("定点定位测试开始 - 请先播放基准音校准");
     } else if (mode === "abx") {
       setAbxTrials(generateABXTrials());
       setCurrentABXTrial(0);
@@ -170,7 +217,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     } else if (mode === "continuous") {
       setStatus("连续听音模式 - 请先播放测试音，然后对四个维度评分");
     }
-  }, [mode, stopPlayback, generateAllTrials, totalTrials, setStatus]);
+  }, [mode, stopPlayback, setStatus]);
 
   // 播放测试音（定点定位）
   const playTestTone = useCallback(
@@ -242,6 +289,152 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
       setStatus(`第 ${next + 1}/${totalTrials} 试次`);
     }
   }, [currentTrial, trials, totalTrials, setStatus]);
+
+  // ===== 新定点定位模式函数 =====
+
+  // 开始校准（播放7个基准音）
+  const startCalibration = useCallback(async () => {
+    const ctx = await initAudioContext();
+    abortCalibrationRef.current = false;
+
+    setIsCalibrating(true);
+    setCalibrationStep(0);
+    setPositioningPhase("calibrating");
+    setStatus("正在播放基准音校准...");
+
+    await playCalibrationTones(
+      ctx,
+      (step, point, name) => {
+        if (abortCalibrationRef.current) return;
+        setCalibrationStep(step);
+        setCalibrationPoint(point);
+        setStatus(`基准音校准: ${name} (${step + 1}/7)`);
+      },
+      () => {
+        setIsCalibrating(false);
+        setCalibrationPoint(null);
+        setPositioningPhase("playing");
+        setStatus("校准完成！准备播放测试旋律...");
+      }
+    );
+  }, [initAudioContext, setStatus]);
+
+  // 播放测试旋律
+  const playTestMelody = useCallback(async () => {
+    if (!positioningSession) return;
+
+    stopPlayback();
+    const ctx = await initAudioContext();
+
+    setIsPlaying(true);
+    setPositioningPhase("playing");
+    setStatus("正在播放测试旋律...");
+
+    const playback = playMelodyAtPosition(ctx, positioningSession.target, 3.0);
+    currentPlaybackRef.current = playback;
+
+    window.setTimeout(() => {
+      setIsPlaying(false);
+      currentPlaybackRef.current = null;
+      setPositioningPhase("guessing");
+      setStatus("请通过滑块选择感知位置，然后点击保存");
+    }, 3000);
+  }, [positioningSession, initAudioContext, stopPlayback, setStatus]);
+
+  // 更新用户猜测
+  const updateGuess = useCallback((x: number, y: number, z: number) => {
+    setCurrentGuess({
+      x: Math.max(-1, Math.min(1, x)),
+      y: Math.max(-1, Math.min(1, y)),
+      z: Math.max(-1, Math.min(1, z))
+    });
+  }, []);
+
+  // 保存当前轮次结果
+  const saveRound = useCallback(() => {
+    if (!positioningSession) return;
+
+    const target = positioningSession.target;
+    const error = calculateDistance(target, currentGuess);
+
+    const newRound: PositioningRound = {
+      roundId: positioningSession.currentRound + 1,
+      target,
+      userGuess: { ...currentGuess },
+      timestamp: Date.now(),
+      error,
+      isVisible: true
+    };
+
+    setPositioningSession((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        rounds: [...prev.rounds, newRound],
+        currentRound: prev.currentRound + 1
+      };
+    });
+
+    setPositioningPhase("saved");
+    setStatus(`第 ${newRound.roundId} 轮完成！误差: ${error.toFixed(3)}`);
+  }, [positioningSession, currentGuess, setStatus]);
+
+  // 开始新一轮（保留相同target）
+  const startNewRound = useCallback(() => {
+    if (!positioningSession) return;
+
+    setCurrentGuess({ x: 0, y: 0, z: 0 });
+    setPositioningPhase("playing");
+    setStatus("准备播放测试旋律...");
+  }, [positioningSession, setStatus]);
+
+  // 生成新的测试音位置
+  const generateNewTarget = useCallback(() => {
+    const newTarget = generateRandomTarget();
+    setPositioningSession({
+      sessionId: Date.now().toString(),
+      target: newTarget,
+      rounds: [],
+      currentRound: 0
+    });
+    setCurrentGuess({ x: 0, y: 0, z: 0 });
+    setPositioningPhase("idle");
+    setStatus("新的测试位置已生成，请开始校准");
+  }, [setStatus]);
+
+  // 切换某轮结果的显示状态
+  const toggleRoundVisibility = useCallback((roundId: number) => {
+    setPositioningSession((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        rounds: prev.rounds.map((r) =>
+          r.roundId === roundId ? { ...r, isVisible: !r.isVisible } : r
+        )
+      };
+    });
+  }, []);
+
+  // 重播指定基准音
+  const replayBenchmarkTone = useCallback(
+    async (index: number) => {
+      if (index < 0 || index >= BENCHMARK_POINTS.length) return;
+
+      stopPlayback();
+      const ctx = await initAudioContext();
+
+      const { point, name } = BENCHMARK_POINTS[index];
+      const frequency = 440 + index * 30;
+
+      setStatus(`重播: ${name}`);
+      const playback = playPositioningTone(ctx, point, 0.5, frequency);
+
+      window.setTimeout(() => {
+        playback.stop();
+      }, 600);
+    },
+    [initAudioContext, stopPlayback, setStatus]
+  );
 
   // 播放 ABX 测试音
   const playABX = useCallback(
@@ -341,6 +534,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
   // 重置
   const reset = useCallback(() => {
     stopPlayback();
+    abortCalibrationRef.current = true;
     setTrials([]);
     setCurrentTrial(0);
     setCurrentTarget(null);
@@ -350,6 +544,13 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     setContinuousRatings([]);
     setHasPlayedContinuous(false);
     setResults(null);
+    // 重置新定点定位状态
+    setPositioningSession(null);
+    setPositioningPhase("idle");
+    setCurrentGuess({ x: 0, y: 0, z: 0 });
+    setIsCalibrating(false);
+    setCalibrationStep(0);
+    setCalibrationPoint(null);
     setStatus("准备开始声场测试");
   }, [stopPlayback, setStatus]);
 
@@ -384,11 +585,29 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     volume,
     currentTarget,
 
+    // 新定点定位模式状态
+    positioningSession,
+    positioningPhase,
+    currentGuess,
+    isCalibrating,
+    calibrationStep,
+    calibrationPoint,
+
     setMode,
     setVolume,
 
     playTestTone,
     submitGuess,
+
+    // 新定点定位模式函数
+    startCalibration,
+    playTestMelody,
+    updateGuess,
+    saveRound,
+    startNewRound,
+    generateNewTarget,
+    toggleRoundVisibility,
+    replayBenchmarkTone,
 
     playABX,
     submitABXChoice,

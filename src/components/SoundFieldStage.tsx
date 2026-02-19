@@ -2,6 +2,7 @@ import type React from "react";
 import { useState, useRef, useCallback } from "react";
 import { useSoundField } from "../soundfield/useSoundField";
 import type { SoundFieldPoint, SoundFieldDimension } from "../soundfield/soundfield-core";
+import { BENCHMARK_POINTS, ROUND_COLORS } from "../soundfield/soundfield-core";
 
 type SoundFieldStageProps = {
   busy: boolean;
@@ -15,6 +16,9 @@ const DIMENSION_NAMES: Record<SoundFieldDimension, string> = {
   height: "高度",
   immersion: "沉浸感"
 };
+
+// 基准点名称映射
+const BENCHMARK_NAMES = ["原点", "左", "右", "后", "前", "下", "上"];
 
 // 3D Scene constants
 const CUBE_SIZE = 280; // px
@@ -47,11 +51,29 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     volume,
     currentTarget,
 
+    // 新定点定位模式状态
+    positioningSession,
+    positioningPhase,
+    currentGuess,
+    isCalibrating,
+    calibrationStep,
+    calibrationPoint,
+
     setMode,
     setVolume,
 
     playTestTone,
     submitGuess,
+
+    // 新定点定位模式函数
+    startCalibration,
+    playTestMelody,
+    updateGuess,
+    saveRound,
+    startNewRound,
+    generateNewTarget,
+    toggleRoundVisibility,
+    replayBenchmarkTone,
 
     playABX,
     submitABXChoice,
@@ -66,7 +88,6 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
   // 3D Scene state
   const [sceneRotation, setSceneRotation] = useState({ x: -15, y: 25 });
   const [isDragging, setIsDragging] = useState(false);
-  const [tempZ, setTempZ] = useState(0); // Temporary Z coordinate before submitting
   const dragStartRef = useRef({ x: 0, y: 0, rotX: 0, rotY: 0 });
   const sceneRef = useRef<HTMLDivElement>(null);
 
@@ -105,10 +126,11 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     setIsDragging(false);
   }, []);
 
-  // Handle click on 3D cube face
+  // Handle click on 3D cube face (新定点定位模式)
   const handleCubeFaceClick = useCallback((face: string, e: React.MouseEvent<HTMLDivElement>) => {
     if (mode !== "positioning") return;
-    if (!currentTarget) return;
+    if (!positioningSession) return;
+    if (positioningPhase !== "guessing" && positioningPhase !== "playing") return;
     if (isDragging) return; // Don't process click if we were dragging
 
     const rect = e.currentTarget.getBoundingClientRect();
@@ -119,55 +141,49 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     const nu = (u - 0.5) * 2;
     const nv = -(v - 0.5) * 2; // Invert Y so positive is up
 
-    let x = 0, y = 0, z = tempZ;
+    let x = currentGuess.x;
+    let y = currentGuess.y;
+    let z = currentGuess.z;
 
     switch (face) {
-      case 'front': // Y+ plane, Z varies by tempZ
+      case 'front': // Y+ plane
         x = nu;
-        y = 1; // Front face is at Y = 1
+        y = 1;
         z = nv;
-        setTempZ(nv);
         break;
       case 'back': // Y- plane
         x = -nu;
-        y = -1; // Back face is at Y = -1
+        y = -1;
         z = nv;
-        setTempZ(nv);
         break;
       case 'right': // X+ plane
-        x = 1; // Right face is at X = 1
+        x = 1;
         y = nu;
         z = nv;
-        setTempZ(nv);
         break;
       case 'left': // X- plane
-        x = -1; // Left face is at X = -1
+        x = -1;
         y = -nu;
         z = nv;
-        setTempZ(nv);
         break;
       case 'top': // Z+ plane
         x = nu;
         y = nv;
-        z = 1; // Top face is at Z = 1
-        setTempZ(1);
+        z = 1;
         break;
       case 'bottom': // Z- plane
         x = nu;
         y = nv;
-        z = -1; // Bottom face is at Z = -1
-        setTempZ(-1);
+        z = -1;
         break;
     }
 
-    const guess: SoundFieldPoint = {
-      x: Math.max(-1, Math.min(1, x)),
-      y: Math.max(-1, Math.min(1, y)),
-      z: Math.max(-1, Math.min(1, z))
-    };
-
-    submitGuess(guess);
-  }, [mode, currentTarget, isDragging, tempZ, submitGuess]);
+    updateGuess(
+      Math.max(-1, Math.min(1, x)),
+      Math.max(-1, Math.min(1, y)),
+      Math.max(-1, Math.min(1, z))
+    );
+  }, [mode, positioningSession, positioningPhase, isDragging, currentGuess, updateGuess]);
 
   // Preset rotation views
   const setPresetView = useCallback((view: string) => {
@@ -210,10 +226,9 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     }
   }
 
-  // 渲染3D场景
+  // 渲染3D场景（新定点定位模式）
   function render3DScene() {
-    const currentTrialData = trials[currentTrial];
-    const showTarget = currentTrialData?.target && mode === "positioning";
+    const hasSession = positioningSession !== null;
 
     return (
       <div className="soundfield-3d-container">
@@ -305,35 +320,61 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             <div className="listener-position" />
             <div className="listener-head" />
 
-            {/* Current target position (shown after guess) */}
-            {showTarget && currentTrialData.target && (
+            {/* 7个基准点（半透明灰色小球） */}
+            {BENCHMARK_POINTS.map(({ point }, idx) => (
+              <div
+                key={`benchmark-${idx}`}
+                className={`spatial-dot-3d benchmark-dot ${calibrationStep === idx && isCalibrating ? "active" : ""}`}
+                style={{
+                  ["--x" as string]: toCSSPosition(point).x,
+                  ["--y" as string]: toCSSPosition(point).y,
+                  ["--z" as string]: toCSSPosition(point).z
+                }}
+                title={BENCHMARK_NAMES[idx]}
+              />
+            ))}
+
+            {/* 当前测试音位置（红色球，保存后显示） */}
+            {hasSession && positioningSession!.target && positioningPhase === "saved" && (
               <div
                 className="spatial-dot-3d spatial-dot-3d-target"
                 style={{
-                  ["--x" as string]: toCSSPosition(currentTrialData.target).x,
-                  ["--y" as string]: toCSSPosition(currentTrialData.target).y,
-                  ["--z" as string]: toCSSPosition(currentTrialData.target).z
+                  ["--x" as string]: toCSSPosition(positioningSession!.target).x,
+                  ["--y" as string]: toCSSPosition(positioningSession!.target).y,
+                  ["--z" as string]: toCSSPosition(positioningSession!.target).z
                 }}
-                title="目标位置"
+                title="测试音实际位置"
               />
             )}
 
-            {/* History dots from previous trials */}
-            {trials.map(
-              (trial, idx) =>
-                trial.userGuess &&
-                idx < currentTrial && (
-                  <div
-                    key={trial.id}
-                    className="spatial-dot-3d spatial-dot-3d-history"
-                    style={{
-                      ["--x" as string]: toCSSPosition(trial.userGuess).x,
-                      ["--y" as string]: toCSSPosition(trial.userGuess).y,
-                      ["--z" as string]: toCSSPosition(trial.userGuess).z
-                    }}
-                    title={`${DIMENSION_NAMES[trial.dimension]}: ${Math.round(trial.score || 0)}分`}
-                  />
-                )
+            {/* 用户当前选择位置（蓝色预览球，可拖动） */}
+            {hasSession && (positioningPhase === "guessing" || positioningPhase === "playing") && (
+              <div
+                className="spatial-dot-3d user-guess-dot"
+                style={{
+                  ["--x" as string]: toCSSPosition(currentGuess).x,
+                  ["--y" as string]: toCSSPosition(currentGuess).y,
+                  ["--z" as string]: toCSSPosition(currentGuess).z
+                }}
+                title="你的选择"
+              />
+            )}
+
+            {/* 历史轮次结果（不同颜色） */}
+            {hasSession && positioningSession!.rounds.map((round) =>
+              round.isVisible ? (
+                <div
+                  key={`round-${round.roundId}`}
+                  className="spatial-dot-3d round-history-dot"
+                  style={{
+                    ["--x" as string]: toCSSPosition(round.userGuess).x,
+                    ["--y" as string]: toCSSPosition(round.userGuess).y,
+                    ["--z" as string]: toCSSPosition(round.userGuess).z,
+                    ["--round-color" as string]: ROUND_COLORS[(round.roundId - 1) % ROUND_COLORS.length]
+                  }}
+                  title={`第${round.roundId}轮: 误差${round.error.toFixed(3)}`}
+                />
+              ) : null
             )}
           </div>
         </div>
@@ -356,23 +397,72 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     );
   }
 
-  // 渲染Z轴滑块控制
-  function renderZControl() {
+  // 渲染XYZ轴滑块控制
+  function renderXYZControls() {
+    const hasSession = positioningSession !== null;
+    const canAdjust = hasSession && (positioningPhase === "guessing" || positioningPhase === "playing");
+
     return (
-      <div className="soundfield-z-control">
-        <label>
-          <span style={{ fontWeight: 600, color: "#2f855a" }}>高度 (Z)</span>
-          <input
-            type="range"
-            min={-1}
-            max={1}
-            step={0.1}
-            value={tempZ}
-            onChange={(e) => setTempZ(parseFloat(e.target.value))}
-            disabled={!currentTarget || isPlaying}
-          />
-          <span className="z-value">{tempZ.toFixed(1)}</span>
-        </label>
+      <div className="soundfield-xyz-controls">
+        {/* X轴滑块 */}
+        <div className="axis-slider-row">
+          <span className="axis-label x">X (左右)</span>
+          <div className="axis-slider-wrapper">
+            <span className="axis-min">-1</span>
+            <input
+              type="range"
+              className="axis-slider x-axis"
+              min={-1}
+              max={1}
+              step={0.05}
+              value={currentGuess.x}
+              onChange={(e) => updateGuess(parseFloat(e.target.value), currentGuess.y, currentGuess.z)}
+              disabled={!canAdjust}
+            />
+            <span className="axis-max">+1</span>
+          </div>
+          <span className="axis-value">{currentGuess.x.toFixed(2)}</span>
+        </div>
+
+        {/* Y轴滑块 */}
+        <div className="axis-slider-row">
+          <span className="axis-label y">Y (前后)</span>
+          <div className="axis-slider-wrapper">
+            <span className="axis-min">-1</span>
+            <input
+              type="range"
+              className="axis-slider y-axis"
+              min={-1}
+              max={1}
+              step={0.05}
+              value={currentGuess.y}
+              onChange={(e) => updateGuess(currentGuess.x, parseFloat(e.target.value), currentGuess.z)}
+              disabled={!canAdjust}
+            />
+            <span className="axis-max">+1</span>
+          </div>
+          <span className="axis-value">{currentGuess.y.toFixed(2)}</span>
+        </div>
+
+        {/* Z轴滑块 */}
+        <div className="axis-slider-row">
+          <span className="axis-label z">Z (上下)</span>
+          <div className="axis-slider-wrapper">
+            <span className="axis-min">-1</span>
+            <input
+              type="range"
+              className="axis-slider z-axis"
+              min={-1}
+              max={1}
+              step={0.05}
+              value={currentGuess.z}
+              onChange={(e) => updateGuess(currentGuess.x, currentGuess.y, parseFloat(e.target.value))}
+              disabled={!canAdjust}
+            />
+            <span className="axis-max">+1</span>
+          </div>
+          <span className="axis-value">{currentGuess.z.toFixed(2)}</span>
+        </div>
       </div>
     );
   }
@@ -435,41 +525,195 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     );
   }
 
-  // 渲染定点定位模式
+  // 渲染阶段指示器
+  function renderPhaseIndicator() {
+    const phases = [
+      { key: "idle", label: "准备" },
+      { key: "calibrating", label: "校准" },
+      { key: "playing", label: "播放" },
+      { key: "guessing", label: "选择" },
+      { key: "saved", label: "完成" }
+    ];
+
+    const currentIndex = phases.findIndex((p) => p.key === positioningPhase);
+
+    return (
+      <div className="phase-indicator">
+        {phases.map((phase, idx) => (
+          <div
+            key={phase.key}
+            className={`phase-step ${idx <= currentIndex ? "active" : ""} ${idx === currentIndex ? "current" : ""}`}
+          >
+            <div className="phase-dot" />
+            <span className="phase-label">{phase.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // 渲染校准阶段UI
+  function renderCalibrationPhase() {
+    return (
+      <div className="calibration-phase">
+        <div className="benchmark-buttons">
+          {BENCHMARK_NAMES.map((name, idx) => (
+            <button
+              key={idx}
+              className={`benchmark-btn ${calibrationStep === idx && isCalibrating ? "playing" : ""}`}
+              onClick={() => replayBenchmarkTone(idx)}
+              disabled={isCalibrating && calibrationStep !== idx}
+            >
+              {name}
+              {calibrationStep === idx && isCalibrating && <span className="playing-indicator">🔊</span>}
+            </button>
+          ))}
+        </div>
+        {isCalibrating && (
+          <div className="calibration-progress">
+            <div
+              className="calibration-progress-bar"
+              style={{ width: `${((calibrationStep + 1) / 7) * 100}%` }}
+            />
+            <span className="calibration-text">正在校准: {BENCHMARK_NAMES[calibrationStep]} ({calibrationStep + 1}/7)</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 渲染历史记录
+  function renderRoundHistory() {
+    if (!positioningSession || positioningSession.rounds.length === 0) return null;
+
+    return (
+      <div className="round-history">
+        <h4>历史记录</h4>
+        <div className="round-list">
+          {positioningSession.rounds.map((round) => (
+            <div
+              key={round.roundId}
+              className="round-item"
+              style={{ borderLeftColor: ROUND_COLORS[(round.roundId - 1) % ROUND_COLORS.length] }}
+            >
+              <span
+                className="round-color-dot"
+                style={{ backgroundColor: ROUND_COLORS[(round.roundId - 1) % ROUND_COLORS.length] }}
+              />
+              <span className="round-info">
+                第{round.roundId}轮: 误差 {round.error.toFixed(3)}
+              </span>
+              <button
+                className="round-toggle-btn"
+                onClick={() => toggleRoundVisibility(round.roundId)}
+                title={round.isVisible ? "隐藏" : "显示"}
+              >
+                {round.isVisible ? "✓" : "○"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // 渲染定点定位模式（新）
   function renderPositioningMode() {
+    const hasSession = positioningSession !== null;
+    const hasRounds = hasSession && positioningSession!.rounds.length > 0;
+
     return (
       <div className="soundfield-positioning">
-        <div className="soundfield-info">
-          {currentTarget ? (
-            <p>
-              第 <strong>{currentTrial + 1}</strong> / {totalTrials} 试次 | 当前维度:
-              <span
-                style={{
-                  color: getDimensionColor(currentDimension),
-                  fontWeight: 700,
-                  marginLeft: 4
-                }}
-              >
-                {DIMENSION_NAMES[currentDimension]}
-              </span>
-            </p>
-          ) : (
-            <p>点击"开始测试"开始声场定位测试</p>
-          )}
-        </div>
+        {/* 阶段指示器 */}
+        {renderPhaseIndicator()}
 
         {/* 3D 空间场景 */}
         {render3DScene()}
         {renderRotationControls()}
-        {renderZControl()}
 
-        <div className="soundfield-controls row">
-          <button disabled={busy || isPlaying || !currentTarget} onClick={() => playTestTone()}>
-            {isPlaying ? "播放中..." : "播放测试音"}
-          </button>
+        {/* 校准阶段UI */}
+        {renderCalibrationPhase()}
+
+        {/* XYZ滑块控制 */}
+        {renderXYZControls()}
+
+        {/* 控制按钮区域 */}
+        <div className="soundfield-positioning-controls">
+          {!hasSession ? (
+            <div className="control-row">
+              <button
+                className="primary-btn"
+                disabled={busy || isPlaying}
+                onClick={startTest}
+              >
+                开始测试
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* 主要操作按钮 */}
+              <div className="control-row">
+                {positioningPhase === "idle" && (
+                  <button
+                    className="primary-btn"
+                    disabled={isCalibrating}
+                    onClick={startCalibration}
+                  >
+                    {isCalibrating ? "校准中..." : "播放基准音"}
+                  </button>
+                )}
+
+                {(positioningPhase === "playing" || positioningPhase === "idle") && !isCalibrating && (
+                  <button
+                    className="primary-btn"
+                    disabled={isPlaying}
+                    onClick={playTestMelody}
+                  >
+                    {isPlaying ? "播放中..." : "播放测试旋律"}
+                  </button>
+                )}
+
+                {positioningPhase === "guessing" && (
+                  <button
+                    className="save-btn"
+                    onClick={saveRound}
+                  >
+                    保存测试点
+                  </button>
+                )}
+              </div>
+
+              {/* 结果后的操作按钮 */}
+              {positioningPhase === "saved" && (
+                <div className="control-row result-actions">
+                  <button
+                    className="secondary-btn"
+                    onClick={startNewRound}
+                  >
+                    重新测试
+                  </button>
+                  <button
+                    className="secondary-btn"
+                    onClick={generateNewTarget}
+                  >
+                    新随机位置
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
-        <p className="hint">点击立方体表面标记3D位置，或拖拽旋转视角 | 使用高度滑块调整Z轴</p>
+        {/* 历史记录 */}
+        {renderRoundHistory()}
+
+        <p className="hint">
+          {positioningPhase === "idle" && "点击'开始测试'初始化测试环境"}
+          {positioningPhase === "calibrating" && "正在播放7个基准音进行校准..."}
+          {positioningPhase === "playing" && "聆听测试旋律，判断其空间位置"}
+          {positioningPhase === "guessing" && "调整XYZ滑块标记感知位置，然后保存"}
+          {positioningPhase === "saved" && "可选择重新测试（同位置）或生成新位置"}
+        </p>
       </div>
     );
   }
