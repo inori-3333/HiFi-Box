@@ -11,6 +11,7 @@ import {
 import { api } from "./api";
 import { BassReboundStage } from "./components/BassReboundStage";
 import { HearingSweepStage } from "./components/HearingSweepStage";
+import { ImageSizeStage } from "./components/ImageSizeStage";
 import { SoundFieldStage } from "./components/SoundFieldStage";
 import { SpatialStage } from "./components/SpatialStage";
 import { useSpatialTest } from "./spatial/useSpatialTest";
@@ -30,7 +31,7 @@ const SAMPLE_RATE = 48_000;
 const APP_VERSION = "0.1.0";
 const IS_TAURI_RUNTIME = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-type Stage = "home" | "wizard" | "result" | "spatial-select" | "spatial" | "hearing-sweep" | "bass-rebound" | "soundfield";
+type Stage = "home" | "wizard" | "result" | "spatial-select" | "spatial" | "hearing-sweep" | "bass-rebound" | "soundfield" | "image-size";
 
 export default function App() {
   const [stage, setStage] = useState<Stage>("home");
@@ -318,6 +319,15 @@ export default function App() {
               >
                 声场测试
               </button>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setStage("image-size");
+                  setStatus("进入空间结像大小测试");
+                }}
+              >
+                空间结像大小测试
+              </button>
               {!isWebDemo && (
                 <button disabled={busy} onClick={refreshHistory}>
                   刷新历史
@@ -396,6 +406,10 @@ export default function App() {
 
       {stage === "soundfield" && (
         <SoundFieldStage busy={busy} setStatus={setStatus} onBackHome={() => setStage("home")} />
+      )}
+
+      {stage === "image-size" && (
+        <ImageSizeStage busy={busy} setStatus={setStatus} onBackHome={() => setStage("home")} />
       )}
 
       {stage === "wizard" && (
