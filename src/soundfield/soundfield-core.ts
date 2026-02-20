@@ -62,7 +62,7 @@ export const initialPositioningState: PositioningState = {
   phase: "idle",
   currentBenchmarkIndex: -1,
   targetPoint: null,
-  userGuess: { x: 1, y: 1, z: 0 },
+  userGuess: { x: 0, y: 0, z: 0 },
   rounds: [],
   currentRound: 0,
   isPlaying: false,

@@ -152,11 +152,15 @@ export function PositioningMode(props: PositioningModeProps) {
               />
             ))}
 
-            {/* User guess - blue dot */}
+            {/* User guess - blue dot - shifted by +1 in X and Y for display */}
             {positioning.phase !== "idle" && positioning.phase !== "playing-benchmark" && (
               <div
                 className="sf-dot user-guess-dot"
-                style={toTransformStyle(positioning.userGuess)}
+                style={toTransformStyle({
+                  x: positioning.userGuess.x + 1,
+                  y: positioning.userGuess.y + 1,
+                  z: positioning.userGuess.z
+                })}
                 title="你的选择"
               />
             )}
