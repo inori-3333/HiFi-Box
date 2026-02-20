@@ -35,8 +35,8 @@ function toCSSPosition(point: SoundFieldPoint): { x: string; y: string; z: strin
 }
 
 // Position offset to fix display alignment (correct origin is at offset from current display)
-const OFFSET_X = -1 * HALF_CUBE; // -140px (原点显示在x=-1)
-const OFFSET_Y = 1 * HALF_CUBE;  // +140px (原点显示在y=-1，即后方)
+const OFFSET_X = 0;              // 0px (原点显示在x=0，中心)
+const OFFSET_Y = 2 * HALF_CUBE;  // +280px (原点显示在y=-2，即更下方)
 const OFFSET_Z = 0;
 
 // Generate transform style for 3D positioning (direct style, no CSS vars)

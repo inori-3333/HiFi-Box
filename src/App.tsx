@@ -13,7 +13,7 @@ import { BassReboundStage } from "./components/BassReboundStage";
 import { HearingSweepStage } from "./components/HearingSweepStage";
 import { ImageSizeStage } from "./components/ImageSizeStage";
 import { InteractiveConceptStage } from "./components/InteractiveConceptStage";
-import { SoundFieldStage } from "./components/SoundFieldStage";
+import { SoundFieldStage } from "./soundfield/components/SoundFieldStage";
 import { SpatialStage } from "./components/SpatialStage";
 import { useSpatialTest } from "./spatial/useSpatialTest";
 import type {
