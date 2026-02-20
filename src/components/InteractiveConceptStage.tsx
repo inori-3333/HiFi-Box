@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { INTERACTIVE_CONCEPTS } from "../concept-interactive/concepts";
 import { useInteractiveConceptSuite } from "../concept-interactive/useInteractiveConceptSuite";
 import {
-  INTERACTIVE_CONCEPT_ORDER,
   type InteractiveChoice,
   type InteractiveConceptId,
   type InteractiveConceptMetrics,
@@ -13,7 +12,7 @@ type InteractiveConceptStageProps = {
   busy: boolean;
   setStatus: (status: string) => void;
   onBackHome: () => void;
-  initialConcept?: InteractiveConceptId | null;
+  initialConcept: InteractiveConceptId;
 };
 
 function conceptLabel(concept: InteractiveConceptId): string {
@@ -75,12 +74,10 @@ function metricsLines(metrics: InteractiveConceptMetrics): string[] {
 }
 
 export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
-  const { busy, setStatus, onBackHome, initialConcept = null } = props;
+  const { busy, setStatus, onBackHome, initialConcept } = props;
   const suite = useInteractiveConceptSuite();
 
-  const [selectedConcept, setSelectedConcept] = useState<InteractiveConceptId>(
-    initialConcept ?? "ild"
-  );
+  const selectedConcept = initialConcept;
 
   const [choice, setChoice] = useState<InteractiveChoice | undefined>(undefined);
   const [ildEstimateDb, setIldEstimateDb] = useState(1.5);
@@ -94,12 +91,6 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
   const activeConcept = suite.currentConceptId ?? selectedConcept;
 
   useEffect(() => {
-    if (initialConcept) {
-      setSelectedConcept(initialConcept);
-    }
-  }, [initialConcept]);
-
-  useEffect(() => {
     setChoice(undefined);
     setIldEstimateDb(1.5);
     setSensedSubBass(false);
@@ -111,15 +102,15 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
 
   useEffect(() => {
     if (suite.phase === "idle") {
-      setStatus("交互式八项测试准备就绪，请选择概念并开始。");
+      setStatus("交互式测试准备就绪，请点击开始测试。");
     } else if (suite.phase === "practice") {
       setStatus(`练习题进行中：${conceptLabel(activeConcept)}`);
     } else if (suite.phase === "testing") {
       setStatus(`计分题进行中：${conceptLabel(activeConcept)}`);
     } else if (suite.phase === "concept-complete") {
-      setStatus(`${conceptLabel(activeConcept)} 完成，可进入下一项。`);
+      setStatus(`${conceptLabel(activeConcept)} 完成`);
     } else if (suite.phase === "completed") {
-      setStatus(`测试结束，平均分 ${suite.overallScore.toFixed(1)}`);
+      setStatus(`测试结束，得分 ${suite.overallScore.toFixed(1)}`);
     }
   }, [activeConcept, setStatus, suite.overallScore, suite.phase]);
 
@@ -143,10 +134,6 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
 
   function startCurrentConcept() {
     suite.startSingleConcept(selectedConcept);
-  }
-
-  function startFullSuite() {
-    suite.startSuite(selectedConcept);
   }
 
   function handleSubmit() {
@@ -352,33 +339,13 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
   return (
     <section className="grid">
       <div className="card concept-lab-sidebar">
-        <h2>交互式八项测试</h2>
-        <p className="hint">听音-作答-反馈。支持单项和8项闯关。</p>
-        <div className="concept-lab-list">
-          {INTERACTIVE_CONCEPT_ORDER.map((id) => {
-            const done = suite.conceptResults.some((x) => x.concept === id);
-            return (
-              <button
-                key={id}
-                type="button"
-                className={`concept-lab-list-item ${selectedConcept === id ? "active" : ""}`}
-                onClick={() => setSelectedConcept(id)}
-              >
-                <span>{conceptLabel(id)}</span>
-                <span className="hint">{done ? "已完成" : "待测试"}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <p className="hint">当前选择：{conceptDescription(selectedConcept)}</p>
+        <h2>{INTERACTIVE_CONCEPTS[initialConcept].label}</h2>
+        <p className="hint">听音-作答-反馈</p>
+        <p className="hint">{conceptDescription(selectedConcept)}</p>
 
         <div className="row">
           <button disabled={busy} onClick={startCurrentConcept}>
-            开始当前概念
-          </button>
-          <button disabled={busy} onClick={startFullSuite}>
-            开始8项闯关
+            开始测试
           </button>
           <button
             disabled={busy}
@@ -401,8 +368,6 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
         </div>
 
         <div className="concept-lab-overall">
-          <p>已完成：{suite.conceptResults.length}/8</p>
-          <p>平均分：{suite.overallScore.toFixed(1)}</p>
           <p>音频状态：{suite.audioReady ? "已解锁" : "未解锁"}</p>
         </div>
       </div>
@@ -440,12 +405,6 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
           </div>
         )}
 
-        {suite.phase === "concept-complete" && suite.mode === "suite" && (
-          <div className="concept-lab-next">
-            <p>当前概念完成，可进入下一项。</p>
-            <button onClick={suite.moveToNextConcept}>下一项</button>
-          </div>
-        )}
 
         {currentResult && (
           <div className="concept-lab-result">
@@ -467,34 +426,6 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
         )}
       </div>
 
-      {suite.conceptResults.length > 0 && (
-        <div className="card concept-lab-summary">
-          <h2>结果总览</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>概念</th>
-                <th>得分</th>
-                <th>置信度</th>
-                <th>备注</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suite.conceptResults
-                .slice()
-                .sort((a, b) => a.concept.localeCompare(b.concept))
-                .map((result) => (
-                  <tr key={result.concept}>
-                    <td>{conceptLabel(result.concept)}</td>
-                    <td>{result.score.toFixed(1)}</td>
-                    <td>{result.confidence.toFixed(1)}</td>
-                    <td>{result.notes[0] ?? "-"}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      )}
     </section>
   );
 }

@@ -46,14 +46,14 @@ type Stage =
   | "concept-tests";
 
 const CONCEPT_LABELS: Record<InteractiveConceptId, string> = {
-  ild: "左右耳声压差",
-  bass_extension: "低频下潜",
-  treble_extension: "高频延伸",
-  resolution: "解析",
-  separation: "分离",
-  transient: "瞬态",
-  dynamic: "动态",
-  density: "密度"
+  ild: "左右耳声压差测试",
+  bass_extension: "低频下潜测试",
+  treble_extension: "高频延伸测试",
+  resolution: "解析测试",
+  separation: "分离测试",
+  transient: "瞬态测试",
+  dynamic: "动态测试",
+  density: "密度测试"
 };
 
 export default function App() {
@@ -66,7 +66,7 @@ export default function App() {
   const [saveResult, setSaveResult] = useState<SaveResult | null>(null);
   const [exportResult, setExportResult] = useState<ExportResult | null>(null);
   const [history, setHistory] = useState<ProjectSummary[]>([]);
-  const [conceptInitial, setConceptInitial] = useState<InteractiveConceptId | null>(null);
+  const [conceptInitial, setConceptInitial] = useState<InteractiveConceptId>("ild");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("准备开始测试");
   const [sweepAcq, setSweepAcq] = useState<SweepAcquisitionConfig>({
@@ -275,14 +275,10 @@ export default function App() {
     }
   }
 
-  function openConceptTests(conceptId: InteractiveConceptId | null = null) {
+  function openConceptTests(conceptId: InteractiveConceptId) {
     setConceptInitial(conceptId);
     setStage("concept-tests");
-    setStatus(
-      conceptId
-        ? `进入交互式测试：${CONCEPT_LABELS[conceptId]}`
-        : "进入交互式八项声学能力测试"
-    );
+    setStatus(`进入交互式测试：${CONCEPT_LABELS[conceptId]}`);
   }
 
   return (
@@ -298,7 +294,7 @@ export default function App() {
             <h2>首页</h2>
             <p>
               {isWebDemo
-                ? "当前为 GitHub Pages 版本：可使用空间结像测试（2D/3D）。硬件采集类测试需在 Tauri 桌面版运行。"
+                ? "当前为 GitHub Pages 版本：硬件采集类测试需在 Tauri 桌面版运行。"
                 : "新建测试，自动完成设备校验、校准、执行测试与报告生成。"}
             </p>
             <label>
@@ -364,57 +360,51 @@ export default function App() {
               </button>
               <button
                 disabled={busy}
-                onClick={() => openConceptTests(null)}
-              >
-                交互式八项闯关
-              </button>
-              <button
-                disabled={busy}
                 onClick={() => openConceptTests("ild")}
               >
-                左右耳声压差
+                左右耳声压差测试
               </button>
               <button
                 disabled={busy}
                 onClick={() => openConceptTests("bass_extension")}
               >
-                低频下潜
+                低频下潜测试
               </button>
               <button
                 disabled={busy}
                 onClick={() => openConceptTests("treble_extension")}
               >
-                高频延伸
+                高频延伸测试
               </button>
               <button
                 disabled={busy}
                 onClick={() => openConceptTests("resolution")}
               >
-                解析
+                解析测试
               </button>
               <button
                 disabled={busy}
                 onClick={() => openConceptTests("separation")}
               >
-                分离
+                分离测试
               </button>
               <button
                 disabled={busy}
                 onClick={() => openConceptTests("transient")}
               >
-                瞬态
+                瞬态测试
               </button>
               <button
                 disabled={busy}
                 onClick={() => openConceptTests("dynamic")}
               >
-                动态
+                动态测试
               </button>
               <button
                 disabled={busy}
                 onClick={() => openConceptTests("density")}
               >
-                密度
+                密度测试
               </button>
               {!isWebDemo && (
                 <button disabled={busy} onClick={refreshHistory}>
