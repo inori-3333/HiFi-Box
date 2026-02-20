@@ -221,12 +221,54 @@ export function playToneAtPosition(
   };
 }
 
+export function playBufferAtPosition(
+  audioContext: AudioContext,
+  position: Point3D,
+  audioBuffer: AudioBuffer,
+  duration: number,
+  volume: number
+): { stop: () => void } {
+  const source = audioContext.createBufferSource();
+  source.buffer = audioBuffer;
+  source.loop = audioBuffer.duration < duration + 0.05;
+
+  const gainNode = audioContext.createGain();
+  const panner = createSpatialPanner(audioContext, position);
+
+  const now = audioContext.currentTime;
+  gainNode.gain.setValueAtTime(0, now);
+  gainNode.gain.linearRampToValueAtTime(volume, now + 0.05);
+  gainNode.gain.setValueAtTime(volume, now + Math.max(0.06, duration - 0.05));
+  gainNode.gain.linearRampToValueAtTime(0, now + duration);
+
+  source.connect(panner);
+  panner.connect(gainNode);
+  gainNode.connect(audioContext.destination);
+
+  source.start(now);
+  source.stop(now + duration + 0.02);
+
+  return {
+    stop: () => {
+      try {
+        source.stop();
+      } catch {
+        // Already stopped
+      }
+    }
+  };
+}
+
 // Play a single benchmark tone
 export function playBenchmarkTone(
   audioContext: AudioContext,
   point: Point3D,
-  volume: number
+  volume: number,
+  audioBuffer?: AudioBuffer
 ): { stop: () => void } {
+  if (audioBuffer) {
+    return playBufferAtPosition(audioContext, point, audioBuffer, 0.8, volume);
+  }
   // Different frequencies for different positions to help distinguish
   const baseFreq = 440; // A4
   const freq = baseFreq + (point.x + point.y + point.z) * 50;
@@ -238,8 +280,12 @@ export function playBenchmarkTone(
 export function playTestToneAtPosition(
   audioContext: AudioContext,
   position: Point3D,
-  volume: number
+  volume: number,
+  audioBuffer?: AudioBuffer
 ): { stop: () => void } {
+  if (audioBuffer) {
+    return playBufferAtPosition(audioContext, position, audioBuffer, 1.5, volume);
+  }
   // Use a distinct frequency for test tones
   return playToneAtPosition(audioContext, position, 523.25, 1.5, volume); // C5
 }
@@ -468,11 +514,12 @@ export async function playBenchmarkSequence(
   onPointStart: (index: number) => void,
   onComplete: () => void,
   volume: number,
-  delayBetweenTones: number = 300
+  delayBetweenTones: number = 300,
+  audioBuffer?: AudioBuffer
 ): Promise<void> {
   for (let i = 0; i < BENCHMARK_POINTS.length; i++) {
     onPointStart(i);
-    const { stop } = playBenchmarkTone(audioContext, BENCHMARK_POINTS[i].point, volume);
+    const { stop } = playBenchmarkTone(audioContext, BENCHMARK_POINTS[i].point, volume, audioBuffer);
 
     await delay(800); // Play for 800ms
     stop();

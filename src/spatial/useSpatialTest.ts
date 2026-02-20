@@ -11,6 +11,7 @@ import {
   resolveSpatialSeed
 } from "./spatial-core";
 import type { SpatialMode, SpatialPoint, SpatialSceneProfile, SpatialTrial } from "./spatial-core";
+import { loadBuffer } from "../audio/custom-audio";
 
 const BASELINE_POSITION_CYCLES = 1;
 
@@ -290,7 +291,15 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     stopSpatialCue();
 
     const start = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
-    const playback = playSpatialCueAtPoint(ctx, spatialMode, trial.target, start, trial.cueTimbreId);
+    const loaded = await loadBuffer(ctx, "spatial", [`cue:timbre:${trial.cueTimbreId}`, "cue", "default"]);
+    const playback = playSpatialCueAtPoint(
+      ctx,
+      spatialMode,
+      trial.target,
+      start,
+      trial.cueTimbreId,
+      loaded.buffer ?? undefined
+    );
     const stopPlayback = () => {
       playback.stop(ctx.currentTime);
     };
@@ -344,8 +353,10 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
 
     const startAt = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
     let endAt = startAt;
+    const loaded = await loadBuffer(ctx, "spatial", [`cue:timbre:${selectedTimbreId}`, "cue", "default"]);
+    const cueBuffer = loaded.buffer ?? undefined;
     for (let repeatIdx = 0; repeatIdx < BASELINE_REPEAT_COUNT_PER_TONE; repeatIdx += 1) {
-      const playback = playSpatialCueAtPoint(ctx, spatialMode, point, endAt, selectedTimbreId);
+      const playback = playSpatialCueAtPoint(ctx, spatialMode, point, endAt, selectedTimbreId, cueBuffer);
       activeStops.push(playback.stop);
       endAt = playback.endAt;
     }
@@ -382,6 +393,8 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
 
     const points = baselineReferencePoints(spatialMode, currentProfile());
     const baselineToneCount = points.length * BASELINE_POSITION_CYCLES;
+    const loaded = await loadBuffer(ctx, "spatial", [`cue:timbre:${selectedTimbreId}`, "cue", "default"]);
+    const cueBuffer = loaded.buffer ?? undefined;
     const timeoutIds: number[] = [];
     const activeStops: Array<(at: number) => void> = [];
     const sequenceStartAt = ctx.currentTime + SPATIAL_SCHEDULE_LEAD_SEC;
@@ -400,7 +413,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     let toneStartAt = sequenceStartAt;
     for (let idx = 0; idx < baselineToneCount; idx += 1) {
       const point = points[idx % points.length];
-      const firstPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, toneStartAt, selectedTimbreId);
+      const firstPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, toneStartAt, selectedTimbreId, cueBuffer);
       activeStops.push(firstPlayback.stop);
       sequenceEndAt = Math.max(sequenceEndAt, firstPlayback.endAt);
 
@@ -415,7 +428,7 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
 
       let repeatEndAt = firstPlayback.endAt;
       for (let repeatIdx = 1; repeatIdx < BASELINE_REPEAT_COUNT_PER_TONE; repeatIdx += 1) {
-        const repeatPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, repeatEndAt, selectedTimbreId);
+        const repeatPlayback = playSpatialCueAtPoint(ctx, spatialMode, point, repeatEndAt, selectedTimbreId, cueBuffer);
         activeStops.push(repeatPlayback.stop);
         repeatEndAt = repeatPlayback.endAt;
         sequenceEndAt = Math.max(sequenceEndAt, repeatPlayback.endAt);

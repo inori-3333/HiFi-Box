@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "files": [],
+  "params": {
+    "bass.bpm_start": 80,
+    "bass.bpm_end": 360,
+    "bass.duration_sec": 40
+  }
+}

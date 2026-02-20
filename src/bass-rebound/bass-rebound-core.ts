@@ -10,12 +10,29 @@ const LOOKAHEAD_SEC = 0.05;
 
 export { BPM_START, BPM_END, TEST_DURATION_SEC };
 
+export type BeatTestConfig = {
+  bpmStart: number;
+  bpmEnd: number;
+  durationSec: number;
+  lookaheadSec?: number;
+};
+
+function withDefaults(config?: BeatTestConfig): Required<BeatTestConfig> {
+  return {
+    bpmStart: config?.bpmStart ?? BPM_START,
+    bpmEnd: config?.bpmEnd ?? BPM_END,
+    durationSec: config?.durationSec ?? TEST_DURATION_SEC,
+    lookaheadSec: config?.lookaheadSec ?? LOOKAHEAD_SEC
+  };
+}
+
 /**
  * 计算当前BPM（线性增长）
  */
-export function currentBpmAtElapsed(elapsedSec: number): number {
-  const progress = Math.min(elapsedSec, TEST_DURATION_SEC) / TEST_DURATION_SEC;
-  return BPM_START + (BPM_END - BPM_START) * progress;
+export function currentBpmAtElapsed(elapsedSec: number, config?: BeatTestConfig): number {
+  const cfg = withDefaults(config);
+  const progress = Math.min(elapsedSec, cfg.durationSec) / cfg.durationSec;
+  return cfg.bpmStart + (cfg.bpmEnd - cfg.bpmStart) * progress;
 }
 
 /**
@@ -65,8 +82,10 @@ export function startBeatSchedule(
   ctx: AudioContext,
   volume: number,
   onBpmChange: (bpm: number) => void,
-  onComplete: () => void
+  onComplete: () => void,
+  config?: BeatTestConfig
 ): BeatSchedule {
+  const cfg = withDefaults(config);
   const startTime = ctx.currentTime;
   let beatIndex = 0;
   let isRunning = true;
@@ -96,14 +115,14 @@ export function startBeatSchedule(
     const elapsed = ctx.currentTime - startTime;
 
     // 检查是否完成
-    if (elapsed >= TEST_DURATION_SEC) {
+    if (elapsed >= cfg.durationSec) {
       cleanup();
       onComplete();
       return;
     }
 
     // 计算当前BPM
-    const currentBpm = currentBpmAtElapsed(elapsed);
+    const currentBpm = currentBpmAtElapsed(elapsed, cfg);
     onBpmChange(currentBpm);
 
     // 计算下一次beat的时间
@@ -129,7 +148,7 @@ export function startBeatSchedule(
     beatIndex++;
 
     // 使用setTimeout进行下一次调度（提前一点）
-    const timeoutMs = (nextBeatTime - ctx.currentTime - LOOKAHEAD_SEC) * 1000;
+    const timeoutMs = (nextBeatTime - ctx.currentTime - cfg.lookaheadSec) * 1000;
     timeoutId = window.setTimeout(scheduleNextBeat, Math.max(0, timeoutMs));
   }
 
@@ -137,12 +156,12 @@ export function startBeatSchedule(
   const firstBeatTime = startTime + 0.05;
   const firstNode = scheduleKickDrum(ctx, firstBeatTime, volume);
   activeNodes.push(firstNode);
-  onBpmChange(BPM_START);
+  onBpmChange(cfg.bpmStart);
   beatIndex++;
 
   // 启动调度循环
-  const firstInterval = 60 / BPM_START;
-  const firstTimeoutMs = (firstBeatTime - startTime + firstInterval - LOOKAHEAD_SEC) * 1000;
+  const firstInterval = 60 / cfg.bpmStart;
+  const firstTimeoutMs = (firstBeatTime - startTime + firstInterval - cfg.lookaheadSec) * 1000;
   timeoutId = window.setTimeout(scheduleNextBeat, Math.max(0, firstTimeoutMs));
 
   return { stop: cleanup };

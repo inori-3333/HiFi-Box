@@ -201,6 +201,40 @@ function createDualToneBuffer(ctx: AudioContext, duration: number): AudioBuffer 
   return buffer;
 }
 
+type ProgramSource = {
+  node: AudioScheduledSourceNode;
+  start: (at: number) => void;
+  stop: (at: number) => void;
+};
+
+function createProgramSource(
+  ctx: AudioContext,
+  durationSec: number,
+  sourceBuffer?: AudioBuffer,
+  oscillatorType: OscillatorType = "triangle",
+  frequencyHz: number = 440
+): ProgramSource {
+  if (sourceBuffer) {
+    const source = ctx.createBufferSource();
+    source.buffer = sourceBuffer;
+    source.loop = sourceBuffer.duration < durationSec + 0.05;
+    return {
+      node: source,
+      start: (at) => source.start(at),
+      stop: (at) => source.stop(at)
+    };
+  }
+
+  const osc = ctx.createOscillator();
+  osc.type = oscillatorType;
+  osc.frequency.value = frequencyHz;
+  return {
+    node: osc,
+    start: (at) => osc.start(at),
+    stop: (at) => osc.stop(at)
+  };
+}
+
 /**
  * 创建带有指定结像大小的音频
  * @param ctx AudioContext
@@ -211,15 +245,15 @@ function createDualToneBuffer(ctx: AudioContext, duration: number): AudioBuffer 
 export function createImageSizeTone(
   ctx: AudioContext,
   size: number,
-  durationSec: number
+  durationSec: number,
+  sourceBuffer?: AudioBuffer
 ): { nodes: AudioNode[]; stop: () => void } {
   const now = ctx.currentTime;
   const endTime = now + durationSec;
 
-  // 使用 AudioBufferSourceNode 播放预生成的稳定波形
-  const buffer = createDualToneBuffer(ctx, durationSec + 0.1); // 稍微长一点避免边界问题
-  const source = ctx.createBufferSource();
-  source.buffer = buffer;
+  // 使用外部音频时保留算法结构；无外部音频时回退到稳定双频波形
+  const internalBuffer = sourceBuffer ? undefined : createDualToneBuffer(ctx, durationSec + 0.1);
+  const source = createProgramSource(ctx, durationSec + 0.1, sourceBuffer ?? internalBuffer, "triangle", 440);
 
   // 增益控制
   const gain = ctx.createGain();
@@ -252,7 +286,7 @@ export function createImageSizeTone(
   rightGainNode.gain.value = rightGain;
 
   // 连接：source -> gain -> 左右增益 -> merger
-  source.connect(gain);
+  source.node.connect(gain);
   gain.connect(leftGainNode);
   gain.connect(rightGainNode);
   leftGainNode.connect(merger, 0, 0);
@@ -263,17 +297,17 @@ export function createImageSizeTone(
 
   // 启动播放
   source.start(now);
-  source.stop(endTime);
+  source.stop(endTime + 0.02);
 
   const nodes: AudioNode[] = [
-    source, gain,
+    source.node, gain,
     leftGainNode, rightGainNode,
     merger
   ];
 
   const stop = () => {
     try {
-      source.stop();
+      source.stop(ctx.currentTime + 0.01);
     } catch {
       // noop
     }
@@ -301,9 +335,10 @@ export function playImageSizeTone(
   ctx: AudioContext,
   size: number,
   durationSec: number = TONE_DURATION_SEC,
-  onComplete?: () => void
+  onComplete?: () => void,
+  sourceBuffer?: AudioBuffer
 ): { stop: () => void } {
-  const { stop } = createImageSizeTone(ctx, size, durationSec);
+  const { stop } = createImageSizeTone(ctx, size, durationSec, sourceBuffer);
 
   // 设置完成回调
   if (onComplete) {
@@ -334,16 +369,15 @@ export { REFERENCE_SIZE, TONE_DURATION_SEC };
 export function createDecorrelationTone(
   ctx: AudioContext,
   size: number,
-  durationSec: number
+  durationSec: number,
+  sourceBuffer?: AudioBuffer
 ): { nodes: AudioNode[]; stop: () => void } {
   const now = ctx.currentTime;
   const endTime = now + durationSec;
   const width = Math.max(0, Math.min(1, size));
 
-  // 创建主振荡器（三角波作为基础音色）
-  const osc = ctx.createOscillator();
-  osc.type = 'triangle';
-  osc.frequency.value = 440;
+  // 创建主声源（三角波或目录音频）
+  const source = createProgramSource(ctx, durationSec, sourceBuffer, "triangle", 440);
 
   // 增益控制（ADSR包络）
   const gain = ctx.createGain();
@@ -409,17 +443,17 @@ export function createDecorrelationTone(
   merger.connect(ctx.destination);
 
   // 启动振荡器
-  osc.connect(gain);
-  osc.start(now);
-  osc.stop(endTime);
+  source.node.connect(gain);
+  source.start(now);
+  source.stop(endTime + 0.02);
 
   const nodes: AudioNode[] = [
-    osc, gain, merger, dryGainL, dryGainR, wetGainL, wetGainR
+    source.node, gain, merger, dryGainL, dryGainR, wetGainL, wetGainR
   ];
 
   const stop = () => {
     try {
-      osc.stop();
+      source.stop(ctx.currentTime + 0.01);
     } catch { /* noop */ }
     nodes.forEach(node => {
       try { node.disconnect(); } catch { /* noop */ }
@@ -436,16 +470,15 @@ export function createDecorrelationTone(
 export function createICTDTone(
   ctx: AudioContext,
   size: number,
-  durationSec: number
+  durationSec: number,
+  sourceBuffer?: AudioBuffer
 ): { nodes: AudioNode[]; stop: () => void } {
   const now = ctx.currentTime;
   const endTime = now + durationSec;
   const width = Math.max(0, Math.min(1, size));
 
-  // 创建主振荡器
-  const osc = ctx.createOscillator();
-  osc.type = 'sine';
-  osc.frequency.value = 440;
+  // 创建主声源（正弦或目录音频）
+  const source = createProgramSource(ctx, durationSec, sourceBuffer, "sine", 440);
 
   // 增益控制
   const gain = ctx.createGain();
@@ -514,15 +547,15 @@ export function createICTDTone(
   merger.connect(ctx.destination);
 
   // 启动振荡器
-  osc.connect(gain);
-  osc.start(now);
-  osc.stop(endTime);
+  source.node.connect(gain);
+  source.start(now);
+  source.stop(endTime + 0.02);
 
-  const nodes: AudioNode[] = [osc, gain, merger, ...bandNodes];
+  const nodes: AudioNode[] = [source.node, gain, merger, ...bandNodes];
 
   const stop = () => {
     try {
-      osc.stop();
+      source.stop(ctx.currentTime + 0.01);
     } catch { /* noop */ }
     nodes.forEach(node => {
       try { node.disconnect(); } catch { /* noop */ }
@@ -539,16 +572,15 @@ export function createICTDTone(
 export function createHRTFTone(
   ctx: AudioContext,
   size: number,
-  durationSec: number
+  durationSec: number,
+  sourceBuffer?: AudioBuffer
 ): { nodes: AudioNode[]; stop: () => void } {
   const now = ctx.currentTime;
   const endTime = now + durationSec;
   const width = Math.max(0, Math.min(1, size));
 
-  // 创建振荡器
-  const osc = ctx.createOscillator();
-  osc.type = 'triangle';
-  osc.frequency.value = 440;
+  // 创建主声源（三角波或目录音频）
+  const source = createProgramSource(ctx, durationSec, sourceBuffer, "triangle", 440);
 
   // 增益控制
   const gain = ctx.createGain();
@@ -610,15 +642,15 @@ export function createHRTFTone(
   merger.connect(ctx.destination);
 
   // 启动振荡器
-  osc.connect(gain);
-  osc.start(now);
-  osc.stop(endTime);
+  source.node.connect(gain);
+  source.start(now);
+  source.stop(endTime + 0.02);
 
-  const nodes: AudioNode[] = [osc, gain, merger, ...virtualSources];
+  const nodes: AudioNode[] = [source.node, gain, merger, ...virtualSources];
 
   const stop = () => {
     try {
-      osc.stop();
+      source.stop(ctx.currentTime + 0.01);
     } catch { /* noop */ }
     nodes.forEach(node => {
       try { node.disconnect(); } catch { /* noop */ }
@@ -634,9 +666,10 @@ export function createHRTFTone(
 export function createStereoWidthTone(
   ctx: AudioContext,
   size: number,
-  durationSec: number
+  durationSec: number,
+  sourceBuffer?: AudioBuffer
 ): { nodes: AudioNode[]; stop: () => void } {
-  return createImageSizeTone(ctx, size, durationSec);
+  return createImageSizeTone(ctx, size, durationSec, sourceBuffer);
 }
 
 /**
@@ -647,23 +680,24 @@ export function playImageSizeToneByAlgorithm(
   size: number,
   algorithm: ImageSizeAlgorithm,
   durationSec: number = TONE_DURATION_SEC,
-  onComplete?: () => void
+  onComplete?: () => void,
+  sourceBuffer?: AudioBuffer
 ): { stop: () => void } {
   let result: { nodes: AudioNode[]; stop: () => void };
 
   switch (algorithm) {
     case 'decorrelation':
-      result = createDecorrelationTone(ctx, size, durationSec);
+      result = createDecorrelationTone(ctx, size, durationSec, sourceBuffer);
       break;
     case 'ictd':
-      result = createICTDTone(ctx, size, durationSec);
+      result = createICTDTone(ctx, size, durationSec, sourceBuffer);
       break;
     case 'hrtf':
-      result = createHRTFTone(ctx, size, durationSec);
+      result = createHRTFTone(ctx, size, durationSec, sourceBuffer);
       break;
     case 'stereo-width':
     default:
-      result = createStereoWidthTone(ctx, size, durationSec);
+      result = createStereoWidthTone(ctx, size, durationSec, sourceBuffer);
       break;
   }
 

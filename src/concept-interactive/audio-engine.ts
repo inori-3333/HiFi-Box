@@ -1,4 +1,5 @@
 import type { InteractiveTrial, PlaybackVariant } from "./types";
+import { loadBuffer } from "../audio/custom-audio";
 
 type StopHandle = {
   stop: () => void;
@@ -370,7 +371,7 @@ function playTransientClip(ctx: AudioContext, bpm: number, attackMs: number, dec
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, start + t);
-    gain.gain.exponentialRampToValueAtTime(0.35, start + t + attackMs / 1000);
+    gain.gain.exponentialRampToValueAtTime(0.7, start + t + attackMs / 1000);
     gain.gain.exponentialRampToValueAtTime(0.0001, start + t + decayMs / 1000);
 
     osc.connect(gain);
@@ -535,6 +536,304 @@ function playDensityClip(ctx: AudioContext, densityFactor: number): StopHandle {
   };
 }
 
+function createBufferedSource(ctx: AudioContext, buffer: AudioBuffer, durationSec: number): AudioBufferSourceNode {
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.loop = buffer.duration < durationSec + 0.05;
+  source.start();
+  source.stop(ctx.currentTime + durationSec + 0.02);
+  return source;
+}
+
+function stopAndDisconnect(node: AudioNode | AudioScheduledSourceNode): void {
+  try {
+    if ("stop" in node && typeof node.stop === "function") {
+      node.stop();
+    }
+  } catch {
+    // noop
+  }
+  try {
+    node.disconnect();
+  } catch {
+    // noop
+  }
+}
+
+function playDirectBufferClip(ctx: AudioContext, buffer: AudioBuffer, durationSec = 1.05): StopHandle {
+  const source = createBufferedSource(ctx, buffer, durationSec);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.45, ctx.currentTime + 0.02);
+  gain.gain.setValueAtTime(0.45, ctx.currentTime + durationSec * 0.85);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationSec);
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  const cleanup = () => {
+    stopAndDisconnect(source);
+    stopAndDisconnect(gain);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
+function playBufferedIldClip(ctx: AudioContext, buffer: AudioBuffer, deltaDb: number, durationSec: number): StopHandle {
+  const source = createBufferedSource(ctx, buffer, durationSec);
+  const splitter = ctx.createChannelSplitter(2);
+  const merger = ctx.createChannelMerger(2);
+  const left = ctx.createGain();
+  const right = ctx.createGain();
+  const dominant = 0.45;
+  const recessive = dominant / dbToGain(Math.abs(deltaDb));
+  left.gain.value = deltaDb <= 0 ? dominant : recessive;
+  right.gain.value = deltaDb >= 0 ? dominant : recessive;
+  source.connect(splitter);
+  splitter.connect(left, 0);
+  splitter.connect(right, 1);
+  left.connect(merger, 0, 0);
+  right.connect(merger, 0, 1);
+  merger.connect(ctx.destination);
+  const cleanup = () => {
+    stopAndDisconnect(source);
+    stopAndDisconnect(splitter);
+    stopAndDisconnect(left);
+    stopAndDisconnect(right);
+    stopAndDisconnect(merger);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
+function playBufferedFilteredClip(
+  ctx: AudioContext,
+  buffer: AudioBuffer,
+  durationSec: number,
+  filterType: BiquadFilterType,
+  cutoffHz: number
+): StopHandle {
+  const source = createBufferedSource(ctx, buffer, durationSec);
+  const filter = ctx.createBiquadFilter();
+  filter.type = filterType;
+  filter.frequency.value = cutoffHz;
+  filter.Q.value = 0.8;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.45, ctx.currentTime + 0.02);
+  gain.gain.setValueAtTime(0.45, ctx.currentTime + durationSec * 0.85);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationSec);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  const cleanup = () => {
+    stopAndDisconnect(source);
+    stopAndDisconnect(filter);
+    stopAndDisconnect(gain);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
+function playBufferedResolutionClip(
+  ctx: AudioContext,
+  buffer: AudioBuffer,
+  durationSec: number,
+  snrDb: number,
+  detailRatio: number
+): StopHandle {
+  const source = createBufferedSource(ctx, buffer, durationSec);
+  const detailFilter = ctx.createBiquadFilter();
+  detailFilter.type = "lowpass";
+  detailFilter.frequency.value = 2600 + detailRatio * 8000;
+  detailFilter.Q.value = 0.7;
+  const detailGain = ctx.createGain();
+  detailGain.gain.value = 0.45;
+  const noise = ctx.createBufferSource();
+  noise.buffer = createNoiseBuffer(ctx, durationSec + 0.1);
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.value = clamp(0.22 * dbToGain(-snrDb), 0.01, 0.5);
+  source.connect(detailFilter);
+  detailFilter.connect(detailGain);
+  detailGain.connect(ctx.destination);
+  noise.connect(noiseGain);
+  noiseGain.connect(ctx.destination);
+  noise.start();
+  noise.stop(ctx.currentTime + durationSec + 0.02);
+  const cleanup = () => {
+    stopAndDisconnect(source);
+    stopAndDisconnect(detailFilter);
+    stopAndDisconnect(detailGain);
+    stopAndDisconnect(noise);
+    stopAndDisconnect(noiseGain);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
+function playBufferedSeparationClip(
+  ctx: AudioContext,
+  buffer: AudioBuffer,
+  durationSec: number,
+  targetA: number,
+  targetB: number,
+  crosstalk: number
+): StopHandle {
+  const sourceA = createBufferedSource(ctx, buffer, durationSec);
+  const sourceB = createBufferedSource(ctx, buffer, durationSec);
+  const gainA = ctx.createGain();
+  const gainB = ctx.createGain();
+  gainA.gain.value = 0.22;
+  gainB.gain.value = 0.22;
+  const pannerA = ctx.createStereoPanner();
+  const pannerB = ctx.createStereoPanner();
+  pannerA.pan.value = clamp(targetA + crosstalk, -1, 1);
+  pannerB.pan.value = clamp(targetB - crosstalk, -1, 1);
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.exponentialRampToValueAtTime(0.6, ctx.currentTime + 0.02);
+  master.gain.setValueAtTime(0.6, ctx.currentTime + durationSec * 0.82);
+  master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationSec);
+  sourceA.connect(gainA);
+  gainA.connect(pannerA);
+  pannerA.connect(master);
+  sourceB.connect(gainB);
+  gainB.connect(pannerB);
+  pannerB.connect(master);
+  master.connect(ctx.destination);
+  const cleanup = () => {
+    stopAndDisconnect(sourceA);
+    stopAndDisconnect(sourceB);
+    stopAndDisconnect(gainA);
+    stopAndDisconnect(gainB);
+    stopAndDisconnect(pannerA);
+    stopAndDisconnect(pannerB);
+    stopAndDisconnect(master);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
+function playBufferedTransientClip(
+  ctx: AudioContext,
+  buffer: AudioBuffer,
+  bpm: number,
+  attackMs: number,
+  decayMs: number
+): StopHandle {
+  const durationSec = 1.1;
+  const source = createBufferedSource(ctx, buffer, durationSec);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  const interval = 60 / bpm;
+  for (let t = 0; t < durationSec; t += interval) {
+    gain.gain.exponentialRampToValueAtTime(0.55, ctx.currentTime + t + attackMs / 1000);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + decayMs / 1000);
+  }
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  const cleanup = () => {
+    stopAndDisconnect(source);
+    stopAndDisconnect(gain);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
+function playBufferedDynamicClip(ctx: AudioContext, buffer: AudioBuffer, rangeDb: number): StopHandle {
+  const durationSec = 1.15;
+  const source = createBufferedSource(ctx, buffer, durationSec);
+  const gain = ctx.createGain();
+  const start = ctx.currentTime;
+  const minGain = 0.04;
+  const maxGain = clamp(minGain * dbToGain(rangeDb), 0.08, 0.8);
+  for (let i = 0; i <= 6; i += 1) {
+    const t = start + (durationSec * i) / 6;
+    gain.gain.setValueAtTime(i % 2 === 0 ? minGain : maxGain, t);
+  }
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  const cleanup = () => {
+    stopAndDisconnect(source);
+    stopAndDisconnect(gain);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
+function playBufferedDensityClip(ctx: AudioContext, buffer: AudioBuffer, densityFactor: number): StopHandle {
+  const durationSec = 1.2;
+  const source = createBufferedSource(ctx, buffer, durationSec);
+  const shelf = ctx.createBiquadFilter();
+  shelf.type = "highshelf";
+  shelf.frequency.value = 3500;
+  shelf.gain.value = (densityFactor - 4) * 1.2;
+  const drive = ctx.createWaveShaper();
+  const amount = clamp((densityFactor - 2) / 5, 0, 1);
+  const curve = new Float32Array(1024);
+  for (let i = 0; i < curve.length; i += 1) {
+    const x = (i * 2) / (curve.length - 1) - 1;
+    curve[i] = Math.tanh(x * (1 + amount * 3));
+  }
+  drive.curve = curve;
+  drive.oversample = "2x";
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.42, ctx.currentTime + 0.02);
+  gain.gain.setValueAtTime(0.42, ctx.currentTime + durationSec * 0.8);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationSec);
+  source.connect(shelf);
+  shelf.connect(drive);
+  drive.connect(gain);
+  gain.connect(ctx.destination);
+  const cleanup = () => {
+    stopAndDisconnect(source);
+    stopAndDisconnect(shelf);
+    stopAndDisconnect(drive);
+    stopAndDisconnect(gain);
+  };
+  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  return {
+    stop: () => {
+      window.clearTimeout(tid);
+      cleanup();
+    }
+  };
+}
+
 export class InteractiveAudioEngine {
   private context: AudioContext | null = null;
   private active: StopHandle | null = null;
@@ -556,9 +855,34 @@ export class InteractiveAudioEngine {
     }
   }
 
+  private conceptModulePath(trial: InteractiveTrial): string {
+    return `concept-interactive/${trial.concept}`;
+  }
+
+  private async resolveCustomAudio(
+    ctx: AudioContext,
+    trial: InteractiveTrial,
+    variant: PlaybackVariant
+  ): Promise<{ direct: AudioBuffer | null; base: AudioBuffer | null }> {
+    const modulePath = this.conceptModulePath(trial);
+    const roleByVariant: Record<PlaybackVariant, string[]> = {
+      a: ["variant:a", "a"],
+      b: ["variant:b", "b"],
+      x: ["variant:x", "x"],
+      single: ["variant:single", "single"]
+    };
+    const direct = await loadBuffer(ctx, modulePath, roleByVariant[variant]);
+    if (direct.buffer) {
+      return { direct: direct.buffer, base: null };
+    }
+    const base = await loadBuffer(ctx, modulePath, ["base", "default"]);
+    return { direct: null, base: base.buffer ?? null };
+  }
+
   async playTrial(trial: InteractiveTrial, variant: PlaybackVariant, optionDeltaDb?: number): Promise<void> {
     const ctx = await this.ensureReady();
     this.stopCurrent();
+    const custom = await this.resolveCustomAudio(ctx, trial, variant);
 
     switch (trial.concept) {
       case "ild": {
@@ -573,17 +897,29 @@ export class InteractiveAudioEngine {
         const recessive = 0.4 / gainDelta;
         const leftGain = deltaDb < 0 ? dominant : recessive;
         const rightGain = deltaDb > 0 ? dominant : recessive;
-        this.active = playStereoTone(ctx, freq, 0.95, leftGain, rightGain, "sine");
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 0.95)
+          : custom.base
+            ? playBufferedIldClip(ctx, custom.base, deltaDb, 0.95)
+            : playStereoTone(ctx, freq, 0.95, leftGain, rightGain, "sine");
         break;
       }
       case "bass_extension": {
         const cutoff = getNum(trial, variant === "a" ? "a_cutoff_hz" : "b_cutoff_hz", 60);
-        this.active = playBassClip(ctx, cutoff, 1.1);
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 1.1)
+          : custom.base
+            ? playBufferedFilteredClip(ctx, custom.base, 1.1, "highpass", cutoff)
+            : playBassClip(ctx, cutoff, 1.1);
         break;
       }
       case "treble_extension": {
         const cutoff = getNum(trial, variant === "a" ? "a_cutoff_hz" : "b_cutoff_hz", 12000);
-        this.active = playTrebleClip(ctx, cutoff, 1.0);
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 1.0)
+          : custom.base
+            ? playBufferedFilteredClip(ctx, custom.base, 1.0, "lowpass", cutoff)
+            : playTrebleClip(ctx, cutoff, 1.0);
         break;
       }
       case "resolution": {
@@ -599,31 +935,51 @@ export class InteractiveAudioEngine {
             : variant === "a"
               ? detailA
               : detailB;
-        this.active = playResolutionClip(ctx, snrDb, detail, 1.05);
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 1.05)
+          : custom.base
+            ? playBufferedResolutionClip(ctx, custom.base, 1.05, snrDb, detail)
+            : playResolutionClip(ctx, snrDb, detail, 1.05);
         break;
       }
       case "separation": {
         const targetA = getNum(trial, "target_a", -0.4);
         const targetB = getNum(trial, "target_b", 0.4);
         const crosstalk = getNum(trial, "crosstalk", 0.08);
-        this.active = playSeparationClip(ctx, targetA, targetB, crosstalk, 1.05);
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 1.05)
+          : custom.base
+            ? playBufferedSeparationClip(ctx, custom.base, 1.05, targetA, targetB, crosstalk)
+            : playSeparationClip(ctx, targetA, targetB, crosstalk, 1.05);
         break;
       }
       case "transient": {
         const bpm = getNum(trial, "bpm", 160);
         const attack = getNum(trial, variant === "a" ? "a_attack_ms" : "b_attack_ms", 10);
         const decay = getNum(trial, variant === "a" ? "a_decay_ms" : "b_decay_ms", 80);
-        this.active = playTransientClip(ctx, bpm, attack, decay);
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 1.1)
+          : custom.base
+            ? playBufferedTransientClip(ctx, custom.base, bpm, attack, decay)
+            : playTransientClip(ctx, bpm, attack, decay);
         break;
       }
       case "dynamic": {
         const rangeDb = getNum(trial, variant === "a" ? "a_range_db" : "b_range_db", 16);
-        this.active = playDynamicClip(ctx, rangeDb);
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 1.15)
+          : custom.base
+            ? playBufferedDynamicClip(ctx, custom.base, rangeDb)
+            : playDynamicClip(ctx, rangeDb);
         break;
       }
       case "density": {
         const density = getNum(trial, variant === "a" ? "a_density_factor" : "b_density_factor", 4.5);
-        this.active = playDensityClip(ctx, density);
+        this.active = custom.direct
+          ? playDirectBufferClip(ctx, custom.direct, 1.2)
+          : custom.base
+            ? playBufferedDensityClip(ctx, custom.base, density)
+            : playDensityClip(ctx, density);
         break;
       }
     }

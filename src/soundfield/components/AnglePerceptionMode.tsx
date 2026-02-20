@@ -61,8 +61,8 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
       {showHint && (
         <div className="hint-box">
           <p>
-            <strong>提示：</strong>角度感知测试需要音乐文件。
-            请将音乐文件放在 <code>public/audio/soundfield/test-music.mp3</code>
+            <strong>提示：</strong>会优先读取 <code>public/audio/soundfield/manifest.json</code> 中声明的音频（支持
+            <code>.mp3/.flac/.wav/.alac</code>），未找到或解码失败时自动回退为合成音。
           </p>
           <button className="close-hint" onClick={() => setShowHint(false)}>✕</button>
         </div>

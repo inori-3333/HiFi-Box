@@ -796,6 +796,83 @@ function buildPluckPatch(ctx: AudioContext, startAt: number): SpatialCuePatch {
   };
 }
 
+function configureCueFilter(filter: BiquadFilterNode, timbreId: number): void {
+  const normalized = normalizeCueTimbreId(timbreId);
+  switch (normalized) {
+    case 0:
+      filter.type = "lowpass";
+      filter.frequency.value = 420;
+      filter.Q.value = 0.8;
+      return;
+    case 1:
+      filter.type = "bandpass";
+      filter.frequency.value = 1800;
+      filter.Q.value = 1.2;
+      return;
+    case 2:
+      filter.type = "highpass";
+      filter.frequency.value = 4200;
+      filter.Q.value = 0.6;
+      return;
+    case 3:
+      filter.type = "bandpass";
+      filter.frequency.value = 900;
+      filter.Q.value = 0.9;
+      return;
+    case 4:
+      filter.type = "lowpass";
+      filter.frequency.value = 900;
+      filter.Q.value = 1.1;
+      return;
+    case 5:
+      filter.type = "bandpass";
+      filter.frequency.value = 2300;
+      filter.Q.value = 1.4;
+      return;
+    case 6:
+      filter.type = "highshelf";
+      filter.frequency.value = 3600;
+      filter.gain.value = 4;
+      return;
+    default:
+      filter.type = "lowpass";
+      filter.frequency.value = 2600;
+      filter.Q.value = 0.7;
+  }
+}
+
+function buildBufferCuePatch(ctx: AudioContext, startAt: number, timbreId: number, sourceBuffer: AudioBuffer): SpatialCuePatch {
+  const source = ctx.createBufferSource();
+  source.buffer = sourceBuffer;
+  source.loop = sourceBuffer.duration < 0.78;
+
+  const filter = ctx.createBiquadFilter();
+  configureCueFilter(filter, timbreId);
+
+  const timbreGain = ctx.createGain();
+  const duration = Math.max(0.26, Math.min(0.72, sourceBuffer.duration || 0.72));
+  timbreGain.gain.setValueAtTime(0.0001, startAt);
+  timbreGain.gain.exponentialRampToValueAtTime(1, startAt + 0.012);
+  timbreGain.gain.setValueAtTime(1, startAt + duration * 0.82);
+  timbreGain.gain.exponentialRampToValueAtTime(0.0001, startAt + duration);
+
+  const mix = ctx.createGain();
+
+  source.connect(filter);
+  filter.connect(timbreGain);
+  timbreGain.connect(mix);
+
+  source.start(startAt);
+  source.stop(startAt + duration + 0.03);
+
+  return {
+    output: mix,
+    sources: [source],
+    nodes: [source, filter, timbreGain, mix],
+    endAt: startAt + duration
+  };
+}
+
 function normalizeCueTimbreId(timbreId: number): number {
   if (!Number.isFinite(timbreId)) {
     return 0;
@@ -805,7 +882,15 @@ function normalizeCueTimbreId(timbreId: number): number {
   return normalized < 0 ? normalized + SPATIAL_CUE_TIMBRE_COUNT : normalized;
 }
 
-function buildCuePatch(ctx: AudioContext, startAt: number, timbreId: number): SpatialCuePatch {
+function buildCuePatch(
+  ctx: AudioContext,
+  startAt: number,
+  timbreId: number,
+  sourceBuffer?: AudioBuffer
+): SpatialCuePatch {
+  if (sourceBuffer) {
+    return buildBufferCuePatch(ctx, startAt, timbreId, sourceBuffer);
+  }
   const normalized = normalizeCueTimbreId(timbreId);
   switch (normalized) {
     case 0:
@@ -832,7 +917,8 @@ export function playSpatialCueAtPoint(
   mode: SpatialMode,
   point: SpatialPoint,
   startAt: number,
-  timbreId: number
+  timbreId: number,
+  sourceBuffer?: AudioBuffer
 ): { endAt: number; stop: (at: number) => void } {
-  return attachSpatialPlayback(ctx, mode, point, startAt, buildCuePatch(ctx, startAt, timbreId));
+  return attachSpatialPlayback(ctx, mode, point, startAt, buildCuePatch(ctx, startAt, timbreId, sourceBuffer));
 }

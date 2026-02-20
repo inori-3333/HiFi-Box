@@ -9,10 +9,10 @@ import {
   computeImageSizeScore,
   generateImageSizeSession,
   computeOverallResult,
-  playImageSizeTone,
   playImageSizeToneByAlgorithm,
   REFERENCE_SIZE
 } from "./image-size-core";
+import { loadBuffer } from "../audio/custom-audio";
 
 export type ImageSizeController = {
   // 状态
@@ -61,6 +61,8 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
   const audioContextRef = useRef<AudioContext | null>(null);
   const playbackStopRef = useRef<(() => void) | null>(null);
   const currentTargetSizeRef = useRef<number>(0);
+  const referenceBufferRef = useRef<AudioBuffer | null>(null);
+  const testBufferRef = useRef<AudioBuffer | null>(null);
 
   // 停止当前播放
   const stopPlayback = useCallback(() => {
@@ -79,9 +81,34 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
   // 设置算法
   const setAlgorithm = useCallback((algo: ImageSizeAlgorithm) => {
     setAlgorithmState(algo);
+    referenceBufferRef.current = null;
+    testBufferRef.current = null;
     const algoName = ALGORITHM_CONFIGS.find(c => c.type === algo)?.name || algo;
     setStatus(`已切换到算法: ${algoName}`);
   }, [setStatus]);
+
+  const loadImageSizeSource = useCallback(async (kind: "reference" | "test"): Promise<AudioBuffer | null> => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    const ctx = audioContextRef.current;
+    if (ctx.state === "suspended") {
+      await ctx.resume();
+    }
+
+    const cacheRef = kind === "reference" ? referenceBufferRef : testBufferRef;
+    if (cacheRef.current) {
+      return cacheRef.current;
+    }
+    const loaded = await loadBuffer(ctx, "image-size", [
+      `${kind}:${algorithm}`,
+      kind,
+      `algorithm:${algorithm}`,
+      "default"
+    ]);
+    cacheRef.current = loaded.buffer ?? null;
+    return cacheRef.current;
+  }, [algorithm]);
 
   // 播放基准音
   const playReference = useCallback(async () => {
@@ -101,6 +128,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     setPhase("playing-reference");
     const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
     setStatus(`播放基准音（${algoName}）...`);
+    const sourceBuffer = await loadImageSizeSource("reference");
 
     // 播放基准音（使用当前选择的算法）
     const { stop } = playImageSizeToneByAlgorithm(
@@ -115,7 +143,8 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
           setPhase("ready-for-test");
           setStatus("基准音播放完成，可以点击「开始测试」");
         }
-      }
+      },
+      sourceBuffer ?? undefined
     );
 
     playbackStopRef.current = stop;
@@ -124,7 +153,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     window.setTimeout(() => {
       setIsPlayingReference(false);
     }, 1500);
-  }, [stopPlayback, setStatus, phase, algorithm]);
+  }, [algorithm, loadImageSizeSource, phase, setStatus, stopPlayback]);
 
   // 开始测试（生成新的会话）
   const startTest = useCallback(async () => {
@@ -153,6 +182,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     setPhase("playing-test");
     const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
     setStatus(`第 1/${TOTAL_TRIALS} 题（${algoName}）：播放测试音，请调整滑杆匹配结像大小`);
+    const sourceBuffer = await loadImageSizeSource("test");
 
     // 播放测试音（使用选定的算法）
     const { stop } = playImageSizeToneByAlgorithm(
@@ -163,11 +193,12 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
       () => {
         setIsPlayingTest(false);
         setStatus("测试音播放完成，请提交答案");
-      }
+      },
+      sourceBuffer ?? undefined
     );
 
     playbackStopRef.current = stop;
-  }, [stopPlayback, setStatus, algorithm]);
+  }, [algorithm, loadImageSizeSource, setStatus, stopPlayback]);
 
   // 重播当前测试音
   const replayTestTone = useCallback(async () => {
@@ -193,6 +224,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     setPhase("playing-test");
     const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
     setStatus(`第 ${session!.currentTrial + 1}/${TOTAL_TRIALS} 题（${algoName}）：重播测试音`);
+    const sourceBuffer = await loadImageSizeSource("test");
 
     // 播放测试音（使用选定的算法）
     const { stop } = playImageSizeToneByAlgorithm(
@@ -203,11 +235,12 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
       () => {
         setIsPlayingTest(false);
         setStatus("测试音播放完成，请提交答案");
-      }
+      },
+      sourceBuffer ?? undefined
     );
 
     playbackStopRef.current = stop;
-  }, [getCurrentTrial, session, stopPlayback, setStatus, algorithm]);
+  }, [algorithm, getCurrentTrial, loadImageSizeSource, session, setStatus, stopPlayback]);
 
   // 提交答案
   const submitAnswer = useCallback(() => {
@@ -281,6 +314,7 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     setPhase("playing-test");
     const algoName = ALGORITHM_CONFIGS.find(c => c.type === algorithm)?.name || algorithm;
     setStatus(`第 ${nextIndex + 1}/${TOTAL_TRIALS} 题（${algoName}）：播放测试音...`);
+    const sourceBuffer = await loadImageSizeSource("test");
 
     const { stop } = playImageSizeToneByAlgorithm(
       ctx,
@@ -290,11 +324,12 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
       () => {
         setIsPlayingTest(false);
         setStatus("测试音播放完成，请提交答案");
-      }
+      },
+      sourceBuffer ?? undefined
     );
 
     playbackStopRef.current = stop;
-  }, [session, setStatus, algorithm]);
+  }, [algorithm, loadImageSizeSource, session, setStatus]);
 
   // 重置测试
   const resetTest = useCallback(() => {
@@ -308,6 +343,8 @@ export function useImageSizeTest(options: UseImageSizeTestOptions): ImageSizeCon
     setIsPlayingTest(false);
     setOverallResult(null);
     // 不重置algorithm，保持用户选择
+    referenceBufferRef.current = null;
+    testBufferRef.current = null;
     setStatus("准备开始测试");
   }, [stopPlayback, setStatus]);
 
