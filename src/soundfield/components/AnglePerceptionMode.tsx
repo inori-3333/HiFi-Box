@@ -109,7 +109,7 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
           </div>
         )}
 
-        {(angle.phase === "selecting" || angle.phase === "result") && angle.phase !== "idle" && (
+        {(angle.phase === "selecting" || angle.phase === "result") && (
           <div className="selection-section">
             {/* Angle slider */}
             <div className="angle-slider-container">
