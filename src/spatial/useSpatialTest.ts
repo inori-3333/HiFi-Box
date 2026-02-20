@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   SPATIAL_CUE_TIMBRE_COUNT,
@@ -12,6 +12,13 @@ import {
 } from "./spatial-core";
 import type { SpatialMode, SpatialPoint, SpatialSceneProfile, SpatialTrial } from "./spatial-core";
 import { loadBuffer } from "../audio/custom-audio";
+import {
+  playBenchmarkSequence,
+  playTestToneAtPosition,
+  BENCHMARK_POINTS,
+  delay
+} from "../soundfield/soundfield-core";
+import type { PositioningRound } from "../soundfield/soundfield-core";
 
 const BASELINE_POSITION_CYCLES = 1;
 
@@ -35,6 +42,25 @@ type SpatialAverageBreakdown = {
   distance: number;
 };
 
+// 3D定点定位模式状态
+export type Positioning3DPhase = "idle" | "playing-benchmark" | "playing-test" | "selecting" | "submitted" | "result";
+
+export type Positioning3DState = {
+  phase: Positioning3DPhase;
+  currentRound: number;
+  userGuess: SpatialPoint;
+  targetPoint: SpatialPoint | null;
+  rounds: Array<{
+    roundNumber: number;
+    target: SpatialPoint;
+    guess: SpatialPoint;
+    error: number;
+    score: number;
+  }>;
+  isPlaying: boolean;
+  activeBenchmarkIndex: number | null;
+};
+
 export type SpatialTestController = {
   phase: SpatialTestPhase;
   spatialTrials: SpatialTrial[];
@@ -52,6 +78,15 @@ export type SpatialTestController = {
   spatialAverageScore: number;
   spatialAverageBreakdown: SpatialAverageBreakdown | null;
   canGoPrevious: boolean;
+  // 3D定点定位模式
+  positioning3D: Positioning3DState;
+  startPositioning3DBenchmark: () => Promise<void>;
+  startPositioning3DRound: () => Promise<void>;
+  replayPositioning3DTestTone: () => Promise<void>;
+  updatePositioning3DGuess: (x: number, y: number, z: number) => void;
+  submitPositioning3DGuess: () => void;
+  resetPositioning3D: () => void;
+  // 原有方法
   setSpatialSeedInput: (value: string) => void;
   setSpatialGuess: Dispatch<SetStateAction<SpatialPoint | null>>;
   setSelectedTimbreId: (value: number) => void;
@@ -95,6 +130,32 @@ function buildTrials(mode: SpatialMode, profile: SpatialSceneProfile, count: num
   }));
 }
 
+// 生成随机3D点
+function generateRandomSpatialPoint(): SpatialPoint {
+  return {
+    x: Math.random() * 2 - 1,
+    y: Math.random() * 2 - 1,
+    z: Math.random() * 2 - 1,
+  };
+}
+
+// 计算3D距离
+function calculate3DDistance(a: SpatialPoint, b: SpatialPoint): number {
+  return Math.sqrt(
+    Math.pow(a.x - b.x, 2) +
+    Math.pow(a.y - b.y, 2) +
+    Math.pow(a.z - b.z, 2)
+  );
+}
+
+// 距离转换为得分 (0-100)
+function distanceToScore(distance: number): number {
+  const maxDistance = Math.sqrt(12); // 3D空间最大距离 sqrt(4+4+4)
+  const normalized = distance / maxDistance;
+  // 使用指数衰减，距离越近得分越高
+  return Math.max(0, Math.min(100, 100 * Math.exp(-2 * normalized)));
+}
+
 export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestController {
   const { isSpatialStage, onEnterSpatialStage, setStatus } = options;
   const [phase, setPhase] = useState<SpatialTestPhase>("pretest");
@@ -109,11 +170,25 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
   const [baselinePoint, setBaselinePoint] = useState<SpatialPoint | null>(null);
   const [baselineRunning, setBaselineRunning] = useState(false);
   const [pretestBaselinePlayed, setPretestBaselinePlayed] = useState(false);
+
+  // 3D定点定位模式状态
+  const [positioning3D, setPositioning3D] = useState<Positioning3DState>({
+    phase: "idle",
+    currentRound: 0,
+    userGuess: { x: 0, y: 0, z: 0 },
+    targetPoint: null,
+    rounds: [],
+    isPlaying: false,
+    activeBenchmarkIndex: null,
+  });
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const baselineStopRef = useRef<(() => void) | null>(null);
   const pretestAutoplayTimeoutRef = useRef<number | null>(null);
   const cueStopRef = useRef<(() => void) | null>(null);
   const cueStopTimeoutRef = useRef<number | null>(null);
+  const abortControllerRef = useRef<boolean>(false);
+  const currentPlaybackRef = useRef<{ stop: () => void } | null>(null);
 
   const currentSpatialTrial = spatialTrials[spatialIndex];
   const completedSpatialTrials = useMemo(
@@ -524,6 +599,149 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     setSpatialGuess(defaultGuess(spatialMode, speakerMode2d));
   }
 
+  // ==================== 3D定点定位模式 ====================
+
+  const startPositioning3DBenchmark = useCallback(async () => {
+    const ctx = getAudioContext();
+    abortControllerRef.current = false;
+
+    setPositioning3D(prev => ({ ...prev, phase: "playing-benchmark", isPlaying: true }));
+    setStatus("正在播放基准音校准...");
+
+    await playBenchmarkSequence(
+      ctx,
+      (index) => {
+        if (abortControllerRef.current) return;
+        setPositioning3D(prev => ({ ...prev, activeBenchmarkIndex: index }));
+        setStatus(`基准音: ${BENCHMARK_POINTS[index].name} (${index + 1}/${BENCHMARK_POINTS.length})`);
+      },
+      () => {
+        if (abortControllerRef.current) return;
+        setPositioning3D(prev => ({ ...prev, phase: "selecting", isPlaying: false, activeBenchmarkIndex: null }));
+        setStatus('校准完成！点击"开始测试"播放测试音');
+      },
+      0.5,
+      200,
+      undefined
+    );
+  }, [setStatus]);
+
+  const startPositioning3DRound = useCallback(async () => {
+    if (positioning3D.currentRound >= SPATIAL_TRIAL_COUNT) {
+      setPositioning3D(prev => ({ ...prev, phase: "result" }));
+      setStatus("3D定点定位测试完成！");
+      return;
+    }
+
+    const targetPoint = generateRandomSpatialPoint();
+    const ctx = getAudioContext();
+
+    setPositioning3D(prev => ({
+      ...prev,
+      targetPoint,
+      phase: "playing-test",
+      isPlaying: true,
+      userGuess: { x: 0, y: 0, z: 0 },
+    }));
+    setStatus(`第 ${positioning3D.currentRound + 1}/${SPATIAL_TRIAL_COUNT} 轮 - 正在播放测试音...`);
+
+    const playback = playTestToneAtPosition(
+      ctx,
+      targetPoint,
+      0.5,
+      undefined
+    );
+    currentPlaybackRef.current = playback;
+
+    await delay(3500);
+
+    if (!abortControllerRef.current) {
+      currentPlaybackRef.current = null;
+      setPositioning3D(prev => ({ ...prev, phase: "selecting", isPlaying: false }));
+      setStatus("请调整滑块选择声音位置，然后提交");
+    }
+  }, [positioning3D.currentRound, setStatus]);
+
+  const replayPositioning3DTestTone = useCallback(async () => {
+    if (!positioning3D.targetPoint) return;
+    const ctx = getAudioContext();
+
+    setPositioning3D(prev => ({ ...prev, isPlaying: true }));
+    setStatus("正在重复播放测试音...");
+
+    const playback = playTestToneAtPosition(
+      ctx,
+      positioning3D.targetPoint,
+      0.5,
+      undefined
+    );
+    currentPlaybackRef.current = playback;
+
+    await delay(3500);
+
+    if (!abortControllerRef.current) {
+      currentPlaybackRef.current = null;
+      setPositioning3D(prev => ({ ...prev, isPlaying: false }));
+      setStatus("请调整滑块选择声音位置，然后提交");
+    }
+  }, [positioning3D.targetPoint, setStatus]);
+
+  const updatePositioning3DGuess = useCallback((x: number, y: number, z: number) => {
+    setPositioning3D(prev => ({
+      ...prev,
+      userGuess: {
+        x: Math.max(-1, Math.min(1, x)),
+        y: Math.max(-1, Math.min(1, y)),
+        z: Math.max(-1, Math.min(1, z)),
+      },
+    }));
+  }, []);
+
+  const submitPositioning3DGuess = useCallback(() => {
+    if (!positioning3D.targetPoint) return;
+
+    const distance = calculate3DDistance(positioning3D.targetPoint, positioning3D.userGuess);
+    const score = distanceToScore(distance);
+    const round = {
+      roundNumber: positioning3D.currentRound + 1,
+      target: positioning3D.targetPoint,
+      guess: { ...positioning3D.userGuess },
+      error: distance,
+      score,
+    };
+
+    setPositioning3D(prev => ({
+      ...prev,
+      rounds: [...prev.rounds, round],
+      currentRound: prev.currentRound + 1,
+      phase: prev.currentRound + 1 >= SPATIAL_TRIAL_COUNT ? "result" : "submitted",
+      isPlaying: false,
+    }));
+
+    if (positioning3D.currentRound + 1 >= SPATIAL_TRIAL_COUNT) {
+      setStatus(`第 ${positioning3D.currentRound + 1} 轮完成！得分: ${score.toFixed(1)} - 测试结束`);
+    } else {
+      setStatus(`第 ${positioning3D.currentRound + 1} 轮完成！得分: ${score.toFixed(1)} - 点击"下一题"继续`);
+    }
+  }, [positioning3D.targetPoint, positioning3D.userGuess, positioning3D.currentRound, setStatus]);
+
+  const resetPositioning3D = useCallback(() => {
+    abortControllerRef.current = true;
+    if (currentPlaybackRef.current) {
+      currentPlaybackRef.current.stop();
+      currentPlaybackRef.current = null;
+    }
+    setPositioning3D({
+      phase: "idle",
+      currentRound: 0,
+      userGuess: { x: 0, y: 0, z: 0 },
+      targetPoint: null,
+      rounds: [],
+      isPlaying: false,
+      activeBenchmarkIndex: null,
+    });
+  }, []);
+
   useEffect(() => {
     if (!isSpatialStage || phase !== "pretest" || spatialTrials.length === 0 || pretestBaselinePlayed) {
       return;
@@ -571,6 +789,15 @@ export function useSpatialTest(options: UseSpatialTestOptions): SpatialTestContr
     spatialAverageScore,
     spatialAverageBreakdown,
     canGoPrevious,
+    // 3D定点定位模式
+    positioning3D,
+    startPositioning3DBenchmark,
+    startPositioning3DRound,
+    replayPositioning3DTestTone,
+    updatePositioning3DGuess,
+    submitPositioning3DGuess,
+    resetPositioning3D,
+    // 原有方法
     setSpatialSeedInput,
     setSpatialGuess,
     setSelectedTimbreId,

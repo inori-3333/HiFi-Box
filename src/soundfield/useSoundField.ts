@@ -15,20 +15,25 @@ import {
   initialABXState,
   generateRandomPoint,
   generateRandomAngle,
+  generateRandomAbxAnglePair,
   calculateDistance,
   playBenchmarkSequence,
   playTestToneAtPosition,
   playMusicWithAngle,
   playABXVersion,
+  analyzeOpeningAngle,
+  buildAbxTrial,
   calculatePositioningResults,
   calculateAngleResults,
   calculateABXResults,
   BENCHMARK_POINTS,
   delay,
 } from "./soundfield-core";
-import { loadBuffer } from "../audio/custom-audio";
+import { buildPublicUrl } from "../audio/custom-audio";
 
-const TOTAL_ROUNDS = 6;
+const POSITIONING_ROUNDS = 6;
+const ANGLE_ROUNDS = 8;
+const ABX_TRIALS = 8;
 
 export type SoundFieldController = {
   // Mode
@@ -45,6 +50,7 @@ export type SoundFieldController = {
   positioning: PositioningState;
   startBenchmarkPlayback: () => Promise<void>;
   startPositioningRound: () => Promise<void>;
+  replayPositioningTestTone: () => Promise<void>;
   updatePositioningGuess: (x: number, y: number, z: number) => void;
   submitPositioningGuess: () => void;
   resetPositioning: () => void;
@@ -60,7 +66,7 @@ export type SoundFieldController = {
   // ABX mode
   abx: ABXState;
   loadABXMusic: () => Promise<boolean>;
-  playABXVersion: (version: "a" | "b") => Promise<void>;
+  playABXVersion: (version: "a" | "b" | "x") => Promise<void>;
   submitABXChoice: (choice: "a" | "b") => void;
   resetABX: () => void;
 
@@ -96,7 +102,6 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
   const positioningBenchmarkBufferRef = useRef<AudioBuffer | null>(null);
   const positioningTestBufferRef = useRef<AudioBuffer | null>(null);
   const angleMusicBufferRef = useRef<AudioBuffer | null>(null);
-  const abxVariantBuffersRef = useRef<{ a: AudioBuffer; b: AudioBuffer } | null>(null);
   const fallbackMusicBufferRef = useRef<AudioBuffer | null>(null);
 
   // Initialize audio context
@@ -129,27 +134,63 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     if (fallbackMusicBufferRef.current) {
       return fallbackMusicBufferRef.current;
     }
-    const durationSec = 6;
+    // 15秒更丰富的合成音乐 - 使用和弦进行和变化的音色
+    const durationSec = 15;
     const frameCount = Math.ceil(ctx.sampleRate * durationSec);
     const buffer = ctx.createBuffer(2, frameCount, ctx.sampleRate);
     const left = buffer.getChannelData(0);
     const right = buffer.getChannelData(1);
+
+    // 和弦进行的基频 (I-V-vi-IV 进行)
+    const chordRoots = [261.63, 392.00, 220.00, 349.23]; // C4, G4, A3, F4
+    const chordLength = durationSec / chordRoots.length;
+
     for (let i = 0; i < frameCount; i += 1) {
       const t = i / ctx.sampleRate;
-      const pad = Math.sin(2 * Math.PI * 220 * t) * 0.2 + Math.sin(2 * Math.PI * 440 * t) * 0.1;
-      const shimmer = Math.sin(2 * Math.PI * 880 * t) * 0.05;
-      const lfo = Math.sin(2 * Math.PI * 0.25 * t);
-      left[i] = (pad + shimmer) * (0.85 + 0.15 * lfo);
-      right[i] = (pad - shimmer) * (0.85 - 0.15 * lfo);
+      const chordIndex = Math.min(Math.floor(t / chordLength), chordRoots.length - 1);
+      const rootFreq = chordRoots[chordIndex];
+
+      // 构建和弦音 (根音+三度+五度)
+      const fundamental = Math.sin(2 * Math.PI * rootFreq * t) * 0.15;
+      const third = Math.sin(2 * Math.PI * rootFreq * 1.25 * t) * 0.12; // 大三度
+      const fifth = Math.sin(2 * Math.PI * rootFreq * 1.5 * t) * 0.10;  // 纯五度
+      const octave = Math.sin(2 * Math.PI * rootFreq * 2 * t) * 0.08;   // 八度
+
+      // 添加一些谐波让声音更温暖
+      const harmonic2 = Math.sin(2 * Math.PI * rootFreq * 0.5 * t) * 0.05;
+
+      // 缓慢变化的立体声场
+      const lfo = Math.sin(2 * Math.PI * 0.1 * t); // 0.1Hz 缓慢扫频
+      const stereoWidth = 0.3 + 0.2 * Math.sin(2 * Math.PI * 0.05 * t);
+
+      // 包络避免爆音
+      let envelope = 1;
+      const chordTime = t % chordLength;
+      if (chordTime < 0.1) envelope = chordTime / 0.1; // 攻击
+      if (chordTime > chordLength - 0.3) envelope = (chordLength - chordTime) / 0.3; // 释放
+
+      const mix = (fundamental + third + fifth + octave + harmonic2) * envelope;
+
+      // 立体声输出
+      left[i] = mix * (0.85 + stereoWidth * lfo);
+      right[i] = mix * (0.85 - stereoWidth * lfo);
     }
     fallbackMusicBufferRef.current = buffer;
     return buffer;
   }, []);
 
-  const loadSoundFieldBuffer = useCallback(async (roles: string[]): Promise<AudioBuffer | null> => {
+  // Load a specific audio file directly from public folder
+  const loadAudioFile = useCallback(async (relativePath: string): Promise<AudioBuffer | null> => {
     const ctx = await initAudioContext();
-    const result = await loadBuffer(ctx, "soundfield", roles);
-    return result.buffer;
+    const url = buildPublicUrl(relativePath);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const arrayBuffer = await response.arrayBuffer();
+      return await ctx.decodeAudioData(arrayBuffer);
+    } catch {
+      return null;
+    }
   }, [initAudioContext]);
 
   // ==================== Positioning Mode ====================
@@ -157,14 +198,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
   const startBenchmarkPlayback = useCallback(async () => {
     const ctx = await initAudioContext();
     abortControllerRef.current = false;
-    if (!positioningBenchmarkBufferRef.current) {
-      positioningBenchmarkBufferRef.current = await loadSoundFieldBuffer([
-        "positioning:benchmark",
-        "positioning",
-        "default"
-      ]);
-    }
-
+    // 基准音使用钢琴和弦，不传入音频缓冲区
     setPositioning(prev => ({ ...prev, phase: "playing-benchmark", isPlaying: true }));
     setStatus("正在播放基准音校准...");
 
@@ -179,16 +213,16 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
         if (abortControllerRef.current) return;
         setActiveBenchmarkIndex(null);
         setPositioning(prev => ({ ...prev, phase: "selecting", isPlaying: false }));
-        setStatus('校准完成！点击"开始测试"开始定位测试');
+        setStatus('校准完成！点击"开始测试"播放测试音');
       },
       volume,
       200,
-      positioningBenchmarkBufferRef.current ?? undefined
+      undefined // 不传入音频缓冲区，使用钢琴和弦
     );
-  }, [initAudioContext, loadSoundFieldBuffer, setStatus, volume]);
+  }, [initAudioContext, setStatus, volume]);
 
   const startPositioningRound = useCallback(async () => {
-    if (positioning.currentRound >= TOTAL_ROUNDS) {
+    if (positioning.currentRound >= POSITIONING_ROUNDS) {
       setPositioning(prev => ({ ...prev, phase: "result" }));
       setStatus("定点定位测试完成！");
       return;
@@ -196,12 +230,9 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
 
     const targetPoint = generateRandomPoint();
     const ctx = await initAudioContext();
+    // 定点定位模式使用合成音
     if (!positioningTestBufferRef.current) {
-      positioningTestBufferRef.current = await loadSoundFieldBuffer([
-        "positioning:test",
-        "positioning",
-        "default"
-      ]);
+      positioningTestBufferRef.current = ensureFallbackMusicBuffer(ctx);
     }
 
     setPositioning(prev => ({
@@ -211,7 +242,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
       isPlaying: true,
       userGuess: { x: 0, y: 0, z: 0 },
     }));
-    setStatus(`第 ${positioning.currentRound + 1}/${TOTAL_ROUNDS} 轮 - 正在播放测试音...`);
+    setStatus(`第 ${positioning.currentRound + 1}/${POSITIONING_ROUNDS} 轮 - 正在播放测试音...`);
 
     const playback = playTestToneAtPosition(
       ctx,
@@ -229,7 +260,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
       setPositioning(prev => ({ ...prev, phase: "selecting", isPlaying: false }));
       setStatus("请调整滑块选择声音位置，然后提交");
     }
-  }, [initAudioContext, loadSoundFieldBuffer, positioning.currentRound, setStatus, volume]);
+  }, [initAudioContext, ensureFallbackMusicBuffer, positioning.currentRound, setStatus, volume]);
 
   const updatePositioningGuess = useCallback((x: number, y: number, z: number) => {
     setPositioning(prev => ({
@@ -241,6 +272,31 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
       },
     }));
   }, []);
+
+  const replayPositioningTestTone = useCallback(async () => {
+    if (!positioning.targetPoint) return;
+    const ctx = await initAudioContext();
+
+    setPositioning(prev => ({ ...prev, isPlaying: true }));
+    setStatus("正在重复播放测试音...");
+
+    const playback = playTestToneAtPosition(
+      ctx,
+      positioning.targetPoint,
+      volume,
+      positioningTestBufferRef.current ?? undefined
+    );
+    currentPlaybackRef.current = playback;
+
+    await delay(1500);
+
+    if (!abortControllerRef.current) {
+      setIsPlaying(false);
+      currentPlaybackRef.current = null;
+      setPositioning(prev => ({ ...prev, isPlaying: false }));
+      setStatus("请调整滑块选择声音位置，然后提交");
+    }
+  }, [initAudioContext, positioning.targetPoint, volume, setStatus]);
 
   const submitPositioningGuess = useCallback(() => {
     if (!positioning.targetPoint) return;
@@ -257,14 +313,14 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
       ...prev,
       rounds: [...prev.rounds, round],
       currentRound: prev.currentRound + 1,
-      phase: prev.currentRound + 1 >= TOTAL_ROUNDS ? "result" : "selecting",
+      phase: prev.currentRound + 1 >= POSITIONING_ROUNDS ? "result" : "submitted",
       isPlaying: false,
     }));
 
-    if (positioning.currentRound + 1 >= TOTAL_ROUNDS) {
+    if (positioning.currentRound + 1 >= POSITIONING_ROUNDS) {
       setStatus(`第 ${positioning.currentRound + 1} 轮完成！误差: ${error.toFixed(3)} - 测试结束`);
     } else {
-      setStatus(`第 ${positioning.currentRound + 1} 轮完成！误差: ${error.toFixed(3)} - 点击"下一轮"继续`);
+      setStatus(`第 ${positioning.currentRound + 1} 轮完成！误差: ${error.toFixed(3)} - 点击"下一题"继续`);
     }
   }, [positioning.targetPoint, positioning.userGuess, positioning.currentRound, setStatus]);
 
@@ -276,27 +332,21 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
   // ==================== Angle Mode ====================
 
   const loadTestMusic = useCallback(async (): Promise<boolean> => {
-    try {
-      const ctx = await initAudioContext();
-      const loaded = await loadBuffer(ctx, "soundfield", ["angle", "default"]);
-      if (loaded.buffer) {
-        angleMusicBufferRef.current = loaded.buffer;
-        setStatus("已加载目录测试音频");
-        return true;
-      }
-      angleMusicBufferRef.current = ensureFallbackMusicBuffer(ctx);
-      setStatus("未找到可用目录音频，已回退为合成音");
-      return true;
-    } catch {
-      const ctx = await initAudioContext();
-      angleMusicBufferRef.current = ensureFallbackMusicBuffer(ctx);
-      setStatus("目录音频加载失败，已回退为合成音");
+    const ctx = await initAudioContext();
+    // 角度模式使用 public/audio/soundfield/test-music.mp3
+    const buffer = await loadAudioFile("audio/soundfield/test-music.mp3");
+    if (buffer) {
+      angleMusicBufferRef.current = buffer;
+      setStatus("已加载测试音乐");
       return true;
     }
-  }, [ensureFallbackMusicBuffer, initAudioContext, setStatus]);
+    angleMusicBufferRef.current = ensureFallbackMusicBuffer(ctx);
+    setStatus("未找到测试音乐，已回退为合成音");
+    return true;
+  }, [ensureFallbackMusicBuffer, initAudioContext, loadAudioFile, setStatus]);
 
   const startAngleRound = useCallback(async () => {
-    if (angle.currentRound >= TOTAL_ROUNDS) {
+    if (angle.currentRound >= ANGLE_ROUNDS) {
       setAngle(prev => ({ ...prev, phase: "result" }));
       setStatus("角度感知测试完成！");
       return;
@@ -309,17 +359,20 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
 
     const targetAngle = generateRandomAngle();
     const ctx = await initAudioContext();
+    const analysis = analyzeOpeningAngle(ctx, angleMusicBufferRef.current!, targetAngle);
 
     setAngle(prev => ({
       ...prev,
       currentAngle: targetAngle,
+      objectiveCurrentAngle: analysis.cues.openingAngleDeg,
+      currentCues: analysis.cues,
       phase: "playing",
       isPlaying: true,
       userGuess: 90,
     }));
-    setStatus(`第 ${angle.currentRound + 1}/${TOTAL_ROUNDS} 轮 - 正在播放音乐...`);
+    setStatus(`第 ${angle.currentRound + 1}/${ANGLE_ROUNDS} 轮 - 正在播放音乐（左右对称开角）...`);
 
-    const playback = await playMusicWithAngle(ctx, angleMusicBufferRef.current!, targetAngle, volume);
+    const playback = await playMusicWithAngle(ctx, analysis.processedBuffer, 90, volume);
     currentPlaybackRef.current = playback;
 
     // Wait for playback to finish
@@ -329,7 +382,9 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     if (!abortControllerRef.current) {
       stopPlayback();
       setAngle(prev => ({ ...prev, phase: "selecting", isPlaying: false }));
-      setStatus("请调整滑块选择感知角度，然后提交");
+      setStatus(
+        `请调整滑块选择感知开角后提交（等效单侧方位 ±${analysis.cues.thetaSideDeg.toFixed(1)}°）`
+      );
     }
   }, [initAudioContext, angle.currentRound, loadTestMusic, setStatus, volume, stopPlayback]);
 
@@ -338,27 +393,40 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
   }, []);
 
   const submitAngleGuess = useCallback(() => {
-    const error = Math.abs(angle.currentAngle - angle.userGuess);
+    const error = Math.abs(angle.objectiveCurrentAngle - angle.userGuess);
     const round: AngleRound = {
       roundNumber: angle.currentRound + 1,
-      targetAngle: angle.currentAngle,
-      guessAngle: angle.userGuess,
-      error,
+      targetOpeningAngleDeg: angle.currentAngle,
+      guessOpeningAngleDeg: angle.userGuess,
+      errorDeg: error,
+      objectiveOpeningAngleDeg: angle.objectiveCurrentAngle,
+      objectiveSideAzimuthDeg: (angle.currentCues?.thetaSideDeg ?? angle.objectiveCurrentAngle / 2),
+      cues: angle.currentCues ?? {
+        itdSec: 0,
+        ildDb: 0,
+        thetaItdDeg: 45,
+        thetaIldDeg: 45,
+        thetaSideDeg: 45,
+        openingAngleDeg: 90,
+        itdWeight: 0.5,
+        ildWeight: 0.5,
+        confidence: 0.1,
+      },
     };
 
     setAngle(prev => ({
       ...prev,
       rounds: [...prev.rounds, round],
       currentRound: prev.currentRound + 1,
-      phase: prev.currentRound + 1 >= TOTAL_ROUNDS ? "result" : "selecting",
+      phase: prev.currentRound + 1 >= ANGLE_ROUNDS ? "result" : "selecting",
     }));
 
-    if (angle.currentRound + 1 >= TOTAL_ROUNDS) {
+    if (angle.currentRound + 1 >= ANGLE_ROUNDS) {
       setStatus(`第 ${angle.currentRound + 1} 轮完成！误差: ${error}° - 测试结束`);
     } else {
       setStatus(`第 ${angle.currentRound + 1} 轮完成！误差: ${error}° - 点击"下一轮"继续`);
     }
-  }, [angle.currentAngle, angle.userGuess, angle.currentRound, setStatus]);
+  }, [angle.currentAngle, angle.currentCues, angle.objectiveCurrentAngle, angle.userGuess, angle.currentRound, setStatus]);
 
   const resetAngle = useCallback(() => {
     setAngle(initialAngleState);
@@ -368,56 +436,43 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
 
   const loadABXMusic = useCallback(async (): Promise<boolean> => {
     const ctx = await initAudioContext();
-    const explicitA = await loadBuffer(ctx, "soundfield", ["abx:a"]);
-    const explicitB = await loadBuffer(ctx, "soundfield", ["abx:b"]);
-
-    if (explicitA.buffer && explicitB.buffer) {
-      abxVariantBuffersRef.current = { a: explicitA.buffer, b: explicitB.buffer };
-      angleMusicBufferRef.current = null;
-      setStatus("已加载 ABX 显式 A/B 音频");
-      return true;
-    }
-
-    abxVariantBuffersRef.current = null;
-    const base = await loadBuffer(ctx, "soundfield", ["abx:base", "abx", "angle", "default"]);
-    if (base.buffer) {
-      angleMusicBufferRef.current = base.buffer;
-      setStatus("已加载 ABX 基础音频，将通过程序生成差异");
+    // ABX 模式使用 public/audio/soundfield/test-music.mp3
+    const buffer = await loadAudioFile("audio/soundfield/test-music.mp3");
+    if (buffer) {
+      angleMusicBufferRef.current = buffer;
+      setStatus("已加载 ABX 测试音乐");
       return true;
     }
 
     angleMusicBufferRef.current = ensureFallbackMusicBuffer(ctx);
-    setStatus("未找到 ABX 目录音频，已回退为合成音");
+    setStatus("未找到 ABX 测试音乐，已回退为合成音");
     return true;
-  }, [ensureFallbackMusicBuffer, initAudioContext, setStatus]);
+  }, [ensureFallbackMusicBuffer, initAudioContext, loadAudioFile, setStatus]);
 
-  const playABXVersionCallback = useCallback(async (version: "a" | "b") => {
-    if (!abxVariantBuffersRef.current && !angleMusicBufferRef.current) {
+  const playABXVersionCallback = useCallback(async (version: "a" | "b" | "x") => {
+    if (!angleMusicBufferRef.current) {
       const loaded = await loadABXMusic();
       if (!loaded) return;
     }
 
     const ctx = await initAudioContext();
     const currentTrial = abx.trials[abx.currentTrial];
+    if (!currentTrial) {
+      setStatus("当前没有可播放的 ABX 轮次");
+      return;
+    }
 
     stopPlayback();
     setIsPlaying(true);
-    setStatus(`正在播放版本 ${version.toUpperCase()}...`);
+    setStatus(`正在播放版本 ${version.toUpperCase()}（标准 ABX）...`);
 
-    const playback = abxVariantBuffersRef.current
-      ? await playMusicWithAngle(
-        ctx,
-        version === "a" ? abxVariantBuffersRef.current.a : abxVariantBuffersRef.current.b,
-        90,
-        volume
-      )
-      : await playABXVersion(
-        ctx,
-        angleMusicBufferRef.current!,
-        version,
-        currentTrial?.aIsWider ?? true,
-        volume
-      );
+    const playback = await playABXVersion(
+      ctx,
+      angleMusicBufferRef.current!,
+      version,
+      currentTrial,
+      volume
+    );
     currentPlaybackRef.current = playback;
 
     // Play for 5 seconds max
@@ -433,7 +488,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     const currentTrial = abx.trials[abx.currentTrial];
     if (!currentTrial) return;
 
-    const correct = (choice === "a") === currentTrial.aIsWider;
+    const correct = choice === currentTrial.xRef;
     const updatedTrial: ABXTrial = {
       ...currentTrial,
       userChoice: choice,
@@ -449,11 +504,11 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
         trials: newTrials,
         correctCount: prev.correctCount + (correct ? 1 : 0),
         currentTrial: prev.currentTrial + 1,
-        phase: prev.currentTrial + 1 >= TOTAL_ROUNDS ? "result" : "selecting",
+        phase: prev.currentTrial + 1 >= ABX_TRIALS ? "result" : "selecting",
       };
     });
 
-    if (abx.currentTrial + 1 >= TOTAL_ROUNDS) {
+    if (abx.currentTrial + 1 >= ABX_TRIALS) {
       setStatus(`选择 ${choice.toUpperCase()} ${correct ? "正确" : "错误"} - 测试结束`);
     } else {
       setStatus(`选择 ${choice.toUpperCase()} ${correct ? "正确" : "错误"} - 准备下一轮`);
@@ -467,19 +522,37 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
   // Initialize ABX trials when entering ABX mode
   useEffect(() => {
     if (mode === "abx" && abx.trials.length === 0) {
-      // Generate 6 random trials
-      const trials: ABXTrial[] = [];
-      for (let i = 0; i < TOTAL_ROUNDS; i++) {
-        trials.push({
-          trialNumber: i + 1,
-          aIsWider: Math.random() > 0.5,
-          userChoice: null,
-          correct: false,
-        });
-      }
-      setAbx(prev => ({ ...prev, trials, phase: "selecting" }));
+      let cancelled = false;
+      const prepareTrials = async () => {
+        if (!angleMusicBufferRef.current) {
+          const loaded = await loadABXMusic();
+          if (!loaded || !angleMusicBufferRef.current) {
+            return;
+          }
+        }
+
+        const ctx = await initAudioContext();
+        const buffer = angleMusicBufferRef.current!;
+        const trials: ABXTrial[] = [];
+        for (let i = 0; i < ABX_TRIALS; i += 1) {
+          const [aOpeningAngleDeg, bOpeningAngleDeg] = generateRandomAbxAnglePair(30);
+          const xRef: "a" | "b" = Math.random() > 0.5 ? "a" : "b";
+          trials.push(buildAbxTrial(ctx, buffer, i + 1, aOpeningAngleDeg, bOpeningAngleDeg, xRef));
+        }
+
+        if (!cancelled) {
+          setAbx(prev => ({ ...prev, trials, phase: "selecting", currentTrial: 0, correctCount: 0 }));
+          setStatus("ABX 试次已准备：每轮播放 A/B/X，请判断 X 属于 A 或 B");
+        }
+      };
+
+      void prepareTrials();
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [mode, abx.trials.length]);
+    return undefined;
+  }, [mode, abx.trials.length, initAudioContext, loadABXMusic, setStatus]);
 
   // ==================== Reset ====================
 
@@ -493,7 +566,6 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     positioningBenchmarkBufferRef.current = null;
     positioningTestBufferRef.current = null;
     angleMusicBufferRef.current = null;
-    abxVariantBuffersRef.current = null;
     fallbackMusicBufferRef.current = null;
     setStatus("准备开始测试");
   }, [stopPlayback, resetPositioning, resetAngle, resetABX, setStatus]);
@@ -526,6 +598,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
     positioning,
     startBenchmarkPlayback,
     startPositioningRound,
+    replayPositioningTestTone,
     updatePositioningGuess,
     submitPositioningGuess,
     resetPositioning,

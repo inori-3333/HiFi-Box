@@ -50,7 +50,7 @@ export function HearingSweepStage(props: HearingSweepStageProps) {
     <section className="grid">
       <div className="card hearing-sweep-card">
         <h2>扫频可听范围测试</h2>
-        <p>从 15Hz 平滑扫到 20500Hz（20秒）。播放中点击按钮记录最低/最高可听频率。</p>
+        <p>从 15Hz 平滑扫到 20500Hz（30秒）。播放中点击按钮记录最低/最高可听频率。</p>
         <div className="row">
           <button onClick={handleBackHome}>返回首页</button>
         </div>

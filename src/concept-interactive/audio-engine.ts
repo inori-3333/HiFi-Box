@@ -371,7 +371,7 @@ function playTransientClip(ctx: AudioContext, bpm: number, attackMs: number, dec
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, start + t);
-    gain.gain.exponentialRampToValueAtTime(0.7, start + t + attackMs / 1000);
+    gain.gain.exponentialRampToValueAtTime(1.0, start + t + attackMs / 1000);
     gain.gain.exponentialRampToValueAtTime(0.0001, start + t + decayMs / 1000);
 
     osc.connect(gain);
@@ -750,7 +750,7 @@ function playBufferedTransientClip(
   gain.gain.setValueAtTime(0.0001, ctx.currentTime);
   const interval = 60 / bpm;
   for (let t = 0; t < durationSec; t += interval) {
-    gain.gain.exponentialRampToValueAtTime(0.55, ctx.currentTime + t + attackMs / 1000);
+    gain.gain.exponentialRampToValueAtTime(1.0, ctx.currentTime + t + attackMs / 1000);
     gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + decayMs / 1000);
   }
   source.connect(gain);

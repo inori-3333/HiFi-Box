@@ -1,11 +1,13 @@
 import { useState } from "react";
-import type { ABXState, ABXTrial } from "../soundfield-core";
+import type { ABXState } from "../soundfield-core";
 import { calculateABXResults } from "../soundfield-core";
+
+const ABX_TRIALS = 8;
 
 type ABXModeProps = {
   abx: ABXState;
   isPlaying: boolean;
-  onPlayVersion: (version: "a" | "b") => void;
+  onPlayVersion: (version: "a" | "b" | "x") => void;
   onSubmitChoice: (choice: "a" | "b") => void;
   onReset: () => void;
 };
@@ -14,7 +16,7 @@ export function ABXMode(props: ABXModeProps) {
   const { abx, isPlaying, onPlayVersion, onSubmitChoice, onReset } = props;
 
   const [showHint, setShowHint] = useState(true);
-  const [lastPlayed, setLastPlayed] = useState<"a" | "b" | null>(null);
+  const [lastPlayed, setLastPlayed] = useState<"a" | "b" | "x" | null>(null);
 
   const results = abx.phase === "result" && abx.trials.length > 0
     ? calculateABXResults(abx.trials)
@@ -22,7 +24,7 @@ export function ABXMode(props: ABXModeProps) {
 
   const currentTrial = abx.trials[abx.currentTrial];
 
-  const handlePlayVersion = (version: "a" | "b") => {
+  const handlePlayVersion = (version: "a" | "b" | "x") => {
     setLastPlayed(version);
     onPlayVersion(version);
   };
@@ -33,10 +35,10 @@ export function ABXMode(props: ABXModeProps) {
       <div className="progress-bar">
         <div
           className="progress-fill"
-          style={{ width: `${(abx.currentTrial / 6) * 100}%` }}
+          style={{ width: `${(abx.currentTrial / ABX_TRIALS) * 100}%` }}
         />
         <span className="progress-text">
-          第 {abx.currentTrial + (abx.phase === "result" ? 0 : 1)} / 6 轮
+          第 {abx.currentTrial + (abx.phase === "result" ? 0 : 1)} / {ABX_TRIALS} 轮
         </span>
       </div>
 
@@ -56,9 +58,9 @@ export function ABXMode(props: ABXModeProps) {
         {abx.phase === "idle" && (
           <div className="start-section">
             <p className="instruction">
-              在这个测试中，你需要辨别哪个版本的声场更开阔。
+              在这个测试中，你需要进行标准 ABX 判断。
               <br />
-              A和B是同一段音乐，但声场宽度不同。
+              A 与 B 声场开角不同，请判断 X 属于 A 还是 B。
             </p>
             <button
               className="primary-btn large"
@@ -94,6 +96,15 @@ export function ABXMode(props: ABXModeProps) {
                   <span className="play-icon">▶</span>
                   <span className="play-text">{isPlaying ? "播放中..." : "播放"}</span>
                 </button>
+                <button
+                  className={`abx-play-btn ${lastPlayed === "x" ? "last-played" : ""}`}
+                  onClick={() => handlePlayVersion("x")}
+                  disabled={isPlaying}
+                >
+                  <span className="version-label">X</span>
+                  <span className="play-icon">▶</span>
+                  <span className="play-text">{isPlaying ? "播放中..." : "播放"}</span>
+                </button>
               </div>
 
               {lastPlayed && (
@@ -105,21 +116,21 @@ export function ABXMode(props: ABXModeProps) {
 
             {/* Selection */}
             <div className="selection-section">
-              <h4>哪个版本的声场更开阔？</h4>
+              <h4>X 属于 A 还是 B？</h4>
               <div className="choice-buttons">
                 <button
                   className="choice-btn"
                   onClick={() => onSubmitChoice("a")}
                   disabled={isPlaying}
                 >
-                  选 A (更开阔)
+                  选 X = A
                 </button>
                 <button
                   className="choice-btn"
                   onClick={() => onSubmitChoice("b")}
                   disabled={isPlaying}
                 >
-                  选 B (更开阔)
+                  选 X = B
                 </button>
               </div>
             </div>
@@ -127,7 +138,7 @@ export function ABXMode(props: ABXModeProps) {
             {/* Tips */}
             <div className="abx-tips">
               <p className="tip">
-                💡 提示：可以多次切换播放A和B，仔细比较两者的差异
+                💡 提示：可反复播放 A/B/X；先建立 A、B 参照，再判断 X
               </p>
             </div>
           </>
@@ -152,6 +163,18 @@ export function ABXMode(props: ABXModeProps) {
               <div className="stat">
                 <span className="stat-label">总次数:</span>
                 <span className="stat-value">{results.totalTrials}</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">p-value:</span>
+                <span className="stat-value">{results.pValue.toFixed(4)}</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">d':</span>
+                <span className="stat-value">{results.dPrime.toFixed(2)}</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">显著性:</span>
+                <span className="stat-value">{results.significant ? "显著 (p<0.05)" : "未显著"}</span>
               </div>
             </div>
 
@@ -183,8 +206,11 @@ export function ABXMode(props: ABXModeProps) {
             <thead>
               <tr>
                 <th>轮次</th>
-                <th>正确答案是</th>
+                <th>A开角</th>
+                <th>B开角</th>
+                <th>X来源</th>
                 <th>你的选择</th>
+                <th>线索差值</th>
                 <th>结果</th>
               </tr>
             </thead>
@@ -195,8 +221,11 @@ export function ABXMode(props: ABXModeProps) {
                   className={trial.userChoice ? (trial.correct ? "correct" : "incorrect") : ""}
                 >
                   <td>第{trial.trialNumber}轮</td>
-                  <td>{trial.aIsWider ? "A" : "B"}</td>
+                  <td>{trial.aOpeningAngleDeg.toFixed(0)}°</td>
+                  <td>{trial.bOpeningAngleDeg.toFixed(0)}°</td>
+                  <td>{trial.xRef.toUpperCase()}</td>
                   <td>{trial.userChoice?.toUpperCase() || "-"}</td>
+                  <td>{trial.cueDistanceDeg.toFixed(1)}°</td>
                   <td>
                     {trial.userChoice ? (
                       trial.correct ? "✓" : "✗"

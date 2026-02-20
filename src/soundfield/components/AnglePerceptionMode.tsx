@@ -1,6 +1,8 @@
 import { useState } from "react";
-import type { AngleState, AngleRound } from "../soundfield-core";
+import type { AngleState } from "../soundfield-core";
 import { calculateAngleResults } from "../soundfield-core";
+
+const ANGLE_ROUNDS = 8;
 
 type AnglePerceptionModeProps = {
   angle: AngleState;
@@ -72,10 +74,10 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
       <div className="progress-bar">
         <div
           className="progress-fill"
-          style={{ width: `${(angle.currentRound / 6) * 100}%` }}
+          style={{ width: `${(angle.currentRound / ANGLE_ROUNDS) * 100}%` }}
         />
         <span className="progress-text">
-          第 {angle.currentRound + (angle.phase === "result" ? 0 : 1)} / 6 轮
+          第 {angle.currentRound + (angle.phase === "result" ? 0 : 1)} / {ANGLE_ROUNDS} 轮
         </span>
       </div>
 
@@ -84,9 +86,9 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
         {angle.phase === "idle" && (
           <div className="start-section">
             <p className="instruction">
-              在这个测试中，你将听到不同声场宽度的音乐。
+              在这个测试中，你将听到左右对称声场开角不同的音乐。
               <br />
-              请判断你感知到的声场角度大小（0°-180°）。
+              请判断你感知到的开角大小（0°-180°，等效单侧方位为 ±θ）。
             </p>
             <button
               className="primary-btn large"
@@ -115,8 +117,13 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
             <div className="angle-slider-container">
               <div className="angle-display">
                 <span className="angle-value">{angle.userGuess}°</span>
-                <span className="angle-label">感知角度</span>
+                <span className="angle-label">感知开角</span>
               </div>
+              {angle.currentCues && (
+                <p className="hint" style={{ marginTop: 6 }}>
+                  当前等效单侧方位：±{angle.currentCues.thetaSideDeg.toFixed(1)}°
+                </p>
+              )}
 
               <div className="angle-slider-wrapper">
                 <input
@@ -161,7 +168,7 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
             )}
 
             {/* Next round button */}
-            {angle.phase === "selecting" && angle.currentRound > 0 && angle.currentRound < 6 && (
+            {angle.phase === "selecting" && angle.currentRound > 0 && angle.currentRound < ANGLE_ROUNDS && (
               <button
                 className="secondary-btn"
                 onClick={onStartRound}
@@ -181,7 +188,9 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
             <thead>
               <tr>
                 <th>轮次</th>
-                <th>实际角度</th>
+                <th>目标开角</th>
+                <th>客观开角</th>
+                <th>等效单侧方位</th>
                 <th>你的选择</th>
                 <th>误差</th>
                 <th>评价</th>
@@ -191,11 +200,13 @@ export function AnglePerceptionMode(props: AnglePerceptionModeProps) {
               {angle.rounds.map((round) => (
                 <tr key={round.roundNumber}>
                   <td>第{round.roundNumber}轮</td>
-                  <td>{round.targetAngle}°</td>
-                  <td>{round.guessAngle}°</td>
-                  <td>{round.error}°</td>
-                  <td className={getFeedbackClass(round.error)}>
-                    {getFeedback(round.error)}
+                  <td>{round.targetOpeningAngleDeg.toFixed(0)}°</td>
+                  <td>{round.objectiveOpeningAngleDeg.toFixed(1)}°</td>
+                  <td>±{round.objectiveSideAzimuthDeg.toFixed(1)}°</td>
+                  <td>{round.guessOpeningAngleDeg.toFixed(0)}°</td>
+                  <td>{round.errorDeg.toFixed(1)}°</td>
+                  <td className={getFeedbackClass(round.errorDeg)}>
+                    {getFeedback(round.errorDeg)}
                   </td>
                 </tr>
               ))}

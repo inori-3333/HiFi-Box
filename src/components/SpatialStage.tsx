@@ -1,7 +1,8 @@
 import type React from "react";
-import { clamp01ToSigned, planePointToPercent } from "../spatial/spatial-core";
+import { clamp01ToSigned, planePointToPercent, SPATIAL_TRIAL_COUNT } from "../spatial/spatial-core";
 import type { SpatialPlane, SpatialPoint } from "../spatial/spatial-core";
 import type { SpatialTestController } from "../spatial/useSpatialTest";
+import { Spatial3DPositioningMode } from "../spatial/components/Spatial3DPositioningMode";
 
 const timbreNames = ["鼓点声", "军鼓声", "镲片声", "扫弦声", "桶鼓声", "拍手声", "铃铛声", "拨弦声"];
 
@@ -97,6 +98,15 @@ export function SpatialStage(props: SpatialStageProps) {
     spatialAverageScore,
     spatialAverageBreakdown,
     canGoPrevious,
+    // 3D定点定位模式
+    positioning3D,
+    startPositioning3DBenchmark,
+    startPositioning3DRound,
+    replayPositioning3DTestTone,
+    updatePositioning3DGuess,
+    submitPositioning3DGuess,
+    resetPositioning3D,
+    // 原有方法
     setSpatialGuess,
     setSelectedTimbreId,
     setSpeakerMode2d,
@@ -165,10 +175,36 @@ export function SpatialStage(props: SpatialStageProps) {
     }
   }
 
+  // 3D模式下使用新的定点定位组件
+  if (spatialMode === "3d") {
+    return (
+      <section className="grid">
+        <div className="card">
+          <h2>空间结像测试（3D）</h2>
+          <div className="row">
+            <button onClick={onBackHome}>返回首页</button>
+          </div>
+          <Spatial3DPositioningMode
+            state={positioning3D}
+            activeBenchmarkIndex={positioning3D.activeBenchmarkIndex}
+            isPlaying={positioning3D.isPlaying}
+            totalRounds={spatialTrials.length || SPATIAL_TRIAL_COUNT}
+            onStartBenchmark={startPositioning3DBenchmark}
+            onStartRound={startPositioning3DRound}
+            onReplayTestTone={replayPositioning3DTestTone}
+            onUpdateGuess={updatePositioning3DGuess}
+            onSubmitGuess={submitPositioning3DGuess}
+            onReset={resetPositioning3D}
+          />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="grid">
       <div className="card">
-        <h2>空间结像测试（{spatialMode.toUpperCase()}）</h2>
+        <h2>空间结像测试（2D）</h2>
         <div className="row">
           <button onClick={onBackHome}>返回首页</button>
         </div>
@@ -190,17 +226,15 @@ export function SpatialStage(props: SpatialStageProps) {
               </select>
             </label>
 
-            {spatialMode === "2d" && (
-              <label className="toggle-label">
-                <input
-                  type="checkbox"
-                  checked={speakerMode2d}
-                  disabled={busy || baselineRunning}
-                  onChange={(e) => setSpeakerMode2d(e.target.checked)}
-                />
-                音响模式（仅第1/2象限，y≥0）
-              </label>
-            )}
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={speakerMode2d}
+                disabled={busy || baselineRunning}
+                onChange={(e) => setSpeakerMode2d(e.target.checked)}
+              />
+              音响模式（仅第1/2象限，y≥0）
+            </label>
 
             <p>基准音已前置到测试开始前。你可以反复播放整轮基准音，或点击图中任意位置立即重播该点基准音（连放2次）。</p>
             <div className="row">
@@ -213,23 +247,14 @@ export function SpatialStage(props: SpatialStageProps) {
             </div>
             {baselinePoint && <p className="hint">基准点: {formatPoint(baselinePoint)}</p>}
             <p className="hint">{baselineRunning ? "橙点=当前基准音正在播放的位置。" : "可直接点击图中任意点立即重播该点基准音。"}</p>
-            {spatialMode === "3d" ? (
-              <div className="plane-layout plane-layout-compact">
-                <PlaneFigure compact title="XY 正视图" plane="xy" baselinePoint={baselinePoint ?? undefined} onClick={(e) => handlePretestPlaneReplayClick(e, "xy")} />
-                <PlaneFigure compact title="XZ 俯视图" plane="xz" baselinePoint={baselinePoint ?? undefined} onClick={(e) => handlePretestPlaneReplayClick(e, "xz")} />
-                <PlaneFigure compact title="ZY 侧视图" plane="zy" baselinePoint={baselinePoint ?? undefined} onClick={(e) => handlePretestPlaneReplayClick(e, "zy")} />
-              </div>
-            ) : (
-              <ArenaFigure compact baselinePoint={baselinePoint ?? undefined} speakerMode={speakerMode2d} onClick={handleSpatialArena2DClick} />
-            )}
+            <ArenaFigure compact baselinePoint={baselinePoint ?? undefined} speakerMode={speakerMode2d} onClick={handleSpatialArena2DClick} />
           </>
         )}
 
         {isTesting && (
           <>
             <p>
-              第 {spatialIndex + 1}/{spatialTrials.length} 题。
-              {spatialMode === "2d" ? "播放提示音后，在 2D 区域选点并提交。" : "播放提示音后，在三视图中选点并提交。"}
+              第 {spatialIndex + 1}/{spatialTrials.length} 题。播放提示音后，在 2D 区域选点并提交。
             </p>
             <div className="row">
               <button disabled={busy || baselineRunning} onClick={playSpatialCue}>
@@ -245,7 +270,7 @@ export function SpatialStage(props: SpatialStageProps) {
                 type="range"
                 min={-1}
                 max={1}
-                step={spatialMode === "2d" ? 0.005 : 0.01}
+                step={0.005}
                 value={spatialGuess?.x ?? 0}
                 onChange={(e) => {
                   const x = Number.parseFloat(e.target.value);
@@ -259,7 +284,7 @@ export function SpatialStage(props: SpatialStageProps) {
                 type="range"
                 min={-1}
                 max={1}
-                step={spatialMode === "2d" ? 0.005 : 0.01}
+                step={0.005}
                 value={spatialGuess?.y ?? 0}
                 onChange={(e) => {
                   const next = Number.parseFloat(e.target.value);
@@ -268,26 +293,9 @@ export function SpatialStage(props: SpatialStageProps) {
                 }}
               />
             </label>
-            {spatialMode === "3d" && (
-              <label>
-                Z 坐标（后-前）
-                <input
-                  type="range"
-                  min={-1}
-                  max={1}
-                  step={0.01}
-                  value={spatialGuess?.z ?? 0}
-                  onChange={(e) => {
-                    const z = Number.parseFloat(e.target.value);
-                    setSpatialGuess((old) => ({ x: old?.x ?? 0, y: old?.y ?? 0, z }));
-                  }}
-                />
-              </label>
-            )}
             <button onClick={resetSpatialGuess}>重置到中心点</button>
             <p className="hint">
               当前选择: X {spatialGuess?.x.toFixed(2) ?? "0.00"} / Y {spatialGuess?.y.toFixed(2) ?? "0.00"}
-              {spatialMode === "3d" ? ` / Z ${spatialGuess?.z.toFixed(2) ?? "0.00"}` : ""}
             </p>
           </>
         )}
@@ -301,34 +309,18 @@ export function SpatialStage(props: SpatialStageProps) {
         )}
       </div>
 
-      {isTesting &&
-        (spatialMode === "3d" ? (
-          <div className="card">
-            <h2>直角坐标空间（三视图）</h2>
-            <div className="plane-layout">
-              <PlaneFigure title="XY 正视图" plane="xy" userPoint={spatialGuess ?? undefined} onClick={(e) => handleSpatialPlaneClick(e, "xy")} />
-              <PlaneFigure title="XZ 俯视图" plane="xz" userPoint={spatialGuess ?? undefined} onClick={(e) => handleSpatialPlaneClick(e, "xz")} />
-              <PlaneFigure title="ZY 侧视图" plane="zy" userPoint={spatialGuess ?? undefined} onClick={(e) => handleSpatialPlaneClick(e, "zy")} />
-            </div>
-            <p className="hint">蓝点=你的选择。</p>
-            <div className="submit-row">
-              <button disabled={busy || !spatialGuess || baselineRunning} onClick={submitSpatialGuess}>
-                提交并进入下一题
-              </button>
-            </div>
+      {isTesting && (
+        <div className="card">
+          <h2>2D 空间区域{speakerMode2d ? "（音响模式）" : ""}</h2>
+          <ArenaFigure userPoint={spatialGuess ?? undefined} speakerMode={speakerMode2d} onClick={handleSpatialArena2DClick} />
+          <p className="hint">蓝点=你的选择，中心点=你所在位置。</p>
+          <div className="submit-row">
+            <button disabled={busy || !spatialGuess || baselineRunning} onClick={submitSpatialGuess}>
+              提交并进入下一题
+            </button>
           </div>
-        ) : (
-          <div className="card">
-            <h2>2D 空间区域{speakerMode2d ? "（音响模式）" : ""}</h2>
-            <ArenaFigure userPoint={spatialGuess ?? undefined} speakerMode={speakerMode2d} onClick={handleSpatialArena2DClick} />
-            <p className="hint">蓝点=你的选择，中心点=你所在位置。</p>
-            <div className="submit-row">
-              <button disabled={busy || !spatialGuess || baselineRunning} onClick={submitSpatialGuess}>
-                提交并进入下一题
-              </button>
-            </div>
-          </div>
-        ))}
+        </div>
+      )}
 
       <div className="card">
         <h2>{isCompleted ? "最终汇总" : "测试进度"}</h2>
@@ -381,15 +373,7 @@ export function SpatialStage(props: SpatialStageProps) {
                 {spatialTrials.map((trial) => (
                   <div className="result-trial-card" key={`visual-${trial.id}`}>
                     <p className="plane-title">第 {trial.id} 题</p>
-                    {spatialMode === "3d" ? (
-                      <div className="plane-layout plane-layout-compact">
-                        <PlaneFigure compact title="XY 正视图" plane="xy" targetPoint={trial.target} userPoint={trial.user} />
-                        <PlaneFigure compact title="XZ 俯视图" plane="xz" targetPoint={trial.target} userPoint={trial.user} />
-                        <PlaneFigure compact title="ZY 侧视图" plane="zy" targetPoint={trial.target} userPoint={trial.user} />
-                      </div>
-                    ) : (
-                      <ArenaFigure compact targetPoint={trial.target} userPoint={trial.user} speakerMode={speakerMode2d} />
-                    )}
+                    <ArenaFigure compact targetPoint={trial.target} userPoint={trial.user} speakerMode={speakerMode2d} />
                   </div>
                 ))}
               </div>

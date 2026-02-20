@@ -25,6 +25,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     positioning,
     startBenchmarkPlayback,
     startPositioningRound,
+    replayPositioningTestTone,
     updatePositioningGuess,
     submitPositioningGuess,
     resetPositioning,
@@ -57,7 +58,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
     <section className="grid">
       <div className="card soundfield-card">
         <h2>声场测试</h2>
-        <p>评估耳机的空间声场表现，包括定点定位、角度感知和ABX辨别三种测试模式。</p>
+        <p>评估耳机空间声场表现，包括定点定位、对称开角感知和标准 ABX（A/B/X）三种模式。</p>
 
         {/* Back button */}
         <div className="row">
@@ -71,8 +72,8 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
         <div className="soundfield-mode-tabs">
           {[
             { key: "positioning", label: "定点定位", desc: "在3D空间中标记声音位置" },
-            { key: "angle", label: "角度感知", desc: "判断声场角度大小" },
-            { key: "abx", label: "ABX测试", desc: "辨别哪个声场更大" },
+            { key: "angle", label: "角度感知", desc: "判断左右对称声场开角（0°-180°）" },
+            { key: "abx", label: "ABX测试", desc: "播放 A/B/X，判断 X 属于 A 还是 B" },
           ].map((m) => (
             <button
               key={m.key}
@@ -110,6 +111,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
               isPlaying={isPlaying}
               onStartBenchmark={startBenchmarkPlayback}
               onStartRound={startPositioningRound}
+              onReplayTestTone={replayPositioningTestTone}
               onUpdateGuess={updatePositioningGuess}
               onSubmitGuess={submitPositioningGuess}
               onReset={resetPositioning}

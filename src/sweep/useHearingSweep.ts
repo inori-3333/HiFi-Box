@@ -4,7 +4,7 @@ import type { AudioManifest } from "../audio/custom-audio-types";
 
 const DEFAULT_FREQ_START = 15;
 const DEFAULT_FREQ_END = 20_500;
-const DEFAULT_SWEEP_DURATION_SEC = 20;
+const DEFAULT_SWEEP_DURATION_SEC = 30;
 const SWEEP_TAIL_SEC = 0.03;
 
 type SweepCurve = "log" | "linear";

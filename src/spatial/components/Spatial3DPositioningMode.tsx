@@ -1,18 +1,17 @@
 import type React from "react";
 import { useState, useRef, useCallback } from "react";
 import type { CSSProperties } from "react";
-import type { Point3D, PositioningState, PositioningRound } from "../soundfield-core";
-import { BENCHMARK_POINTS, ROUND_COLORS, calculatePositioningResults } from "../soundfield-core";
+import type { SpatialPoint } from "../spatial-core";
+import { BENCHMARK_POINTS, ROUND_COLORS } from "../../soundfield/soundfield-core";
 
 // 3D Scene constants
 const CUBE_SIZE = 280;
 const HALF_CUBE = CUBE_SIZE / 2;
 
 // Generate transform style for 3D positioning
-// Maps point (-1 to +1) to CSS coordinates, shifted by +1 in X and Y
-function toTransformStyle(point: Point3D, extra?: CSSProperties): CSSProperties {
-  const x = (point.x + 1) * HALF_CUBE; // Shift x+ by 1
-  const y = (-point.y + 1) * HALF_CUBE; // Shift y+ by 1 (after inverting Y)
+function toTransformStyle(point: SpatialPoint, extra?: CSSProperties): CSSProperties {
+  const x = (point.x + 1) * HALF_CUBE;
+  const y = (-point.y + 1) * HALF_CUBE;
   const z = point.z * HALF_CUBE;
   return {
     transform: `translate(-50%, -50%) translate3d(${x}px, ${y}px, ${z}px)`,
@@ -20,10 +19,34 @@ function toTransformStyle(point: Point3D, extra?: CSSProperties): CSSProperties 
   };
 }
 
-type PositioningModeProps = {
-  positioning: PositioningState;
+type Phase = "idle" | "playing-benchmark" | "playing-test" | "selecting" | "submitted" | "result";
+
+export type Spatial3DState = {
+  phase: Phase;
+  currentRound: number;
+  userGuess: SpatialPoint;
+  targetPoint: SpatialPoint | null;
+  rounds: Array<{
+    roundNumber: number;
+    target: SpatialPoint;
+    guess: SpatialPoint;
+    error: number;
+  }>;
+};
+
+export const initialSpatial3DState: Spatial3DState = {
+  phase: "idle",
+  currentRound: 0,
+  userGuess: { x: 0, y: 0, z: 0 },
+  targetPoint: null,
+  rounds: [],
+};
+
+type Spatial3DPositioningModeProps = {
+  state: Spatial3DState;
   activeBenchmarkIndex: number | null;
   isPlaying: boolean;
+  totalRounds: number;
   onStartBenchmark: () => void;
   onStartRound: () => void;
   onReplayTestTone: () => void;
@@ -32,11 +55,12 @@ type PositioningModeProps = {
   onReset: () => void;
 };
 
-export function PositioningMode(props: PositioningModeProps) {
+export function Spatial3DPositioningMode(props: Spatial3DPositioningModeProps) {
   const {
-    positioning,
+    state,
     activeBenchmarkIndex,
     isPlaying,
+    totalRounds,
     onStartBenchmark,
     onStartRound,
     onReplayTestTone,
@@ -90,8 +114,17 @@ export function PositioningMode(props: PositioningModeProps) {
     }
   }, []);
 
-  const results = positioning.phase === "result" && positioning.rounds.length > 0
-    ? calculatePositioningResults(positioning.rounds)
+  const calculateResults = () => {
+    if (state.rounds.length === 0) return null;
+    const errors = state.rounds.map(r => r.error);
+    const averageError = errors.reduce((a, b) => a + b, 0) / errors.length;
+    const maxError = Math.max(...errors);
+    const minError = Math.min(...errors);
+    return { averageError, maxError, minError, totalRounds: state.rounds.length };
+  };
+
+  const results = state.phase === "result" && state.rounds.length > 0
+    ? calculateResults()
     : null;
 
   return (
@@ -105,13 +138,13 @@ export function PositioningMode(props: PositioningModeProps) {
           { key: "selecting", label: "选择" },
           { key: "submitted", label: "已提交" },
           { key: "result", label: "结果" }
-        ].map((phase, idx) => {
-          const isActive = positioning.phase === phase.key ||
-            (positioning.phase === "playing-test" && phase.key === "selecting");
+        ].map((phase) => {
+          const isActive = state.phase === phase.key ||
+            (state.phase === "playing-test" && phase.key === "selecting");
           return (
             <div
               key={phase.key}
-              className={`phase-step ${isActive ? "active" : ""} ${positioning.phase === phase.key ? "current" : ""}`}
+              className={`phase-step ${isActive ? "active" : ""} ${state.phase === phase.key ? "current" : ""}`}
             >
               <div className="phase-dot" />
               <span className="phase-label">{phase.label}</span>
@@ -156,25 +189,25 @@ export function PositioningMode(props: PositioningModeProps) {
             ))}
 
             {/* User guess - blue dot */}
-            {positioning.phase !== "idle" && positioning.phase !== "playing-benchmark" && (
+            {state.phase !== "idle" && state.phase !== "playing-benchmark" && (
               <div
                 className="sf-dot user-guess-dot"
-                style={toTransformStyle(positioning.userGuess)}
+                style={toTransformStyle(state.userGuess)}
                 title="你的选择"
               />
             )}
 
             {/* Target point - only shown after submission or in results */}
-            {(positioning.phase === "submitted" || positioning.phase === "result") && positioning.targetPoint && (
+            {(state.phase === "submitted" || state.phase === "result") && state.targetPoint && (
               <div
                 className="sf-dot target-dot"
-                style={toTransformStyle(positioning.targetPoint)}
+                style={toTransformStyle(state.targetPoint)}
                 title="目标位置"
               />
             )}
 
             {/* Round history */}
-            {positioning.rounds.map((round) => (
+            {state.rounds.map((round) => (
               <div
                 key={`round-${round.roundNumber}`}
                 className="sf-dot round-history-dot"
@@ -199,7 +232,7 @@ export function PositioningMode(props: PositioningModeProps) {
       </div>
 
       {/* XYZ Sliders */}
-      {positioning.phase !== "idle" && positioning.phase !== "playing-benchmark" && positioning.phase !== "result" && (
+      {state.phase !== "idle" && state.phase !== "playing-benchmark" && state.phase !== "result" && (
         <div className="soundfield-xyz-controls">
           <div className="axis-slider-row">
             <span className="axis-label x">X (左右)</span>
@@ -211,13 +244,13 @@ export function PositioningMode(props: PositioningModeProps) {
                 min={-1}
                 max={1}
                 step={0.05}
-                value={positioning.userGuess.x}
-                onChange={(e) => onUpdateGuess(parseFloat(e.target.value), positioning.userGuess.y, positioning.userGuess.z)}
-                disabled={positioning.phase !== "selecting"}
+                value={state.userGuess.x}
+                onChange={(e) => onUpdateGuess(parseFloat(e.target.value), state.userGuess.y, state.userGuess.z)}
+                disabled={state.phase !== "selecting"}
               />
               <span className="axis-max">+1</span>
             </div>
-            <span className="axis-value">{positioning.userGuess.x.toFixed(2)}</span>
+            <span className="axis-value">{state.userGuess.x.toFixed(2)}</span>
           </div>
 
           <div className="axis-slider-row">
@@ -230,13 +263,13 @@ export function PositioningMode(props: PositioningModeProps) {
                 min={-1}
                 max={1}
                 step={0.05}
-                value={positioning.userGuess.y}
-                onChange={(e) => onUpdateGuess(positioning.userGuess.x, parseFloat(e.target.value), positioning.userGuess.z)}
-                disabled={positioning.phase !== "selecting"}
+                value={state.userGuess.y}
+                onChange={(e) => onUpdateGuess(state.userGuess.x, parseFloat(e.target.value), state.userGuess.z)}
+                disabled={state.phase !== "selecting"}
               />
               <span className="axis-max">+1</span>
             </div>
-            <span className="axis-value">{positioning.userGuess.y.toFixed(2)}</span>
+            <span className="axis-value">{state.userGuess.y.toFixed(2)}</span>
           </div>
 
           <div className="axis-slider-row">
@@ -249,20 +282,20 @@ export function PositioningMode(props: PositioningModeProps) {
                 min={-1}
                 max={1}
                 step={0.05}
-                value={positioning.userGuess.z}
-                onChange={(e) => onUpdateGuess(positioning.userGuess.x, positioning.userGuess.y, parseFloat(e.target.value))}
-                disabled={positioning.phase !== "selecting"}
+                value={state.userGuess.z}
+                onChange={(e) => onUpdateGuess(state.userGuess.x, state.userGuess.y, parseFloat(e.target.value))}
+                disabled={state.phase !== "selecting"}
               />
               <span className="axis-max">+1</span>
             </div>
-            <span className="axis-value">{positioning.userGuess.z.toFixed(2)}</span>
+            <span className="axis-value">{state.userGuess.z.toFixed(2)}</span>
           </div>
         </div>
       )}
 
       {/* Control buttons */}
       <div className="control-buttons">
-        {positioning.phase === "idle" && (
+        {state.phase === "idle" && (
           <button
             className="primary-btn"
             disabled={isPlaying}
@@ -272,9 +305,9 @@ export function PositioningMode(props: PositioningModeProps) {
           </button>
         )}
 
-        {positioning.phase === "selecting" && (
+        {state.phase === "selecting" && (
           <>
-            {!positioning.targetPoint ? (
+            {!state.targetPoint ? (
               <button
                 className="primary-btn"
                 onClick={onStartRound}
@@ -296,7 +329,7 @@ export function PositioningMode(props: PositioningModeProps) {
                 >
                   {isPlaying ? "播放中..." : "重播测试音"}
                 </button>
-                {positioning.currentRound > 0 && (
+                {state.currentRound > 0 && (
                   <button
                     className="secondary-btn"
                     onClick={onStartRound}
@@ -309,13 +342,13 @@ export function PositioningMode(props: PositioningModeProps) {
           </>
         )}
 
-        {positioning.phase === "playing-test" && (
+        {state.phase === "playing-test" && (
           <button className="primary-btn" disabled>
             播放中...
           </button>
         )}
 
-        {positioning.phase === "submitted" && (
+        {state.phase === "submitted" && (
           <button
             className="primary-btn"
             onClick={onStartRound}
@@ -324,7 +357,7 @@ export function PositioningMode(props: PositioningModeProps) {
           </button>
         )}
 
-        {positioning.phase === "result" && (
+        {state.phase === "result" && (
           <button className="secondary-btn" onClick={onReset}>
             重新开始
           </button>
@@ -333,11 +366,11 @@ export function PositioningMode(props: PositioningModeProps) {
 
       {/* Progress */}
       <div className="progress-indicator">
-        进度: {positioning.currentRound} / {6} 轮
+        进度: {state.currentRound} / {totalRounds} 轮
       </div>
 
       {/* Round history table */}
-      {positioning.rounds.length > 0 && (
+      {state.rounds.length > 0 && (
         <div className="round-history">
           <h4>历史记录</h4>
           <table className="round-table">
@@ -350,7 +383,7 @@ export function PositioningMode(props: PositioningModeProps) {
               </tr>
             </thead>
             <tbody>
-              {positioning.rounds.map((round) => (
+              {state.rounds.map((round) => (
                 <tr key={round.roundNumber}>
                   <td style={{ color: ROUND_COLORS[(round.roundNumber - 1) % ROUND_COLORS.length] }}>
                     第{round.roundNumber}轮
