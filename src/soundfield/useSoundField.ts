@@ -292,7 +292,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
 
   // ===== 新定点定位模式函数 =====
 
-  // 开始校准（播放7个基准音）
+  // 开始校准（播放基准音）
   const startCalibration = useCallback(async () => {
     const ctx = await initAudioContext();
     abortCalibrationRef.current = false;
@@ -308,7 +308,7 @@ export function useSoundField(options: UseSoundFieldOptions): SoundFieldControll
         if (abortCalibrationRef.current) return;
         setCalibrationStep(step);
         setCalibrationPoint(point);
-        setStatus(`基准音校准: ${name} (${step + 1}/7)`);
+        setStatus(`基准音校准: ${name} (${step + 1}/${BENCHMARK_POINTS.length})`);
       },
       () => {
         setIsCalibrating(false);

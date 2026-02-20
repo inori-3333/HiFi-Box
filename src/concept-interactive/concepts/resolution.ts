@@ -3,7 +3,7 @@ import { conceptScore, dPrimeFromAccuracy, round1, scoreHigherBetter, scoreLower
 import type { InteractiveConceptDefinition, InteractiveConceptResult, InteractiveTrial } from "../types";
 import { accuracyPercent, scoredTrials, summarizeConfidence } from "./helpers";
 
-const SNR_LEVELS_DB = [6, 3, 0, -3, -6, -9];
+const SNR_LEVELS_DB = [9, 6, 3, 0, -3, -6, -9, -12];
 
 export const resolutionConcept: InteractiveConceptDefinition = {
   id: "resolution",

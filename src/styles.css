@@ -918,10 +918,31 @@ td {
 
 .benchmark-dot.active {
   background: #ffeb3b;
-  box-shadow: 0 0 16px rgba(255, 235, 59, 0.8);
+  box-shadow:
+    0 0 20px rgba(255, 235, 59, 0.9),
+    0 0 40px rgba(255, 235, 59, 0.6),
+    0 0 60px rgba(255, 235, 59, 0.4);
   opacity: 1;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
+  animation: benchmark-pulse 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes benchmark-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow:
+      0 0 20px rgba(255, 235, 59, 0.9),
+      0 0 40px rgba(255, 235, 59, 0.6),
+      0 0 60px rgba(255, 235, 59, 0.4);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.4);
+    box-shadow:
+      0 0 30px rgba(255, 235, 59, 1),
+      0 0 60px rgba(255, 235, 59, 0.8),
+      0 0 90px rgba(255, 235, 59, 0.6);
+  }
 }
 
 /* 用户选择点 */
@@ -929,12 +950,12 @@ td {
   background: #2196f3;
   box-shadow: 0 0 12px rgba(33, 150, 243, 0.6);
   border: 2px solid rgba(255, 255, 255, 0.9);
-  animation: pulse 1.5s infinite;
+  animation: pulse-scale 1.5s infinite;
 }
 
-@keyframes pulse {
-  0%, 100% { transform: translate(-50%, -50%) translate3d(var(--x, 0px), var(--y, 0px), var(--z, 0px)) scale(1); }
-  50% { transform: translate(-50%, -50%) translate3d(var(--x, 0px), var(--y, 0px), var(--z, 0px)) scale(1.1); }
+@keyframes pulse-scale {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(1.2); }
 }
 
 /* 历史轮次点 */

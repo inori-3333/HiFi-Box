@@ -3,7 +3,7 @@ import { conceptScore, round1, scoreHigherBetter, scoreLowerBetter } from "../sc
 import type { InteractiveConceptDefinition, InteractiveConceptResult, InteractiveTrial } from "../types";
 import { accuracyPercent, meanOf, scoredTrials, summarizeConfidence } from "./helpers";
 
-const DENSITY_LEVELS = [3.8, 4.4, 5.0, 5.6, 6.2];
+const DENSITY_LEVELS = [3.2, 3.8, 4.4, 5.0, 5.6, 6.2, 6.8, 7.4];
 
 export const densityConcept: InteractiveConceptDefinition = {
   id: "density",

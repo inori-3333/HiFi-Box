@@ -3,7 +3,7 @@ import { conceptScore, round1, scoreHigherBetter, scoreLowerBetter } from "../sc
 import type { InteractiveConceptDefinition, InteractiveConceptResult, InteractiveTrial } from "../types";
 import { meanOf, scoredTrials, summarizeConfidence } from "./helpers";
 
-const GAPS = [0.7, 0.58, 0.46, 0.36, 0.3];
+const GAPS = [0.9, 0.75, 0.62, 0.5, 0.4, 0.32, 0.26, 0.22];
 
 export const separationConcept: InteractiveConceptDefinition = {
   id: "separation",

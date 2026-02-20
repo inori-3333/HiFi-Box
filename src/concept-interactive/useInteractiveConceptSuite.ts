@@ -165,7 +165,7 @@ export type InteractiveConceptSuiteController = {
   audioReady: boolean;
   startSingleConcept: (conceptId: InteractiveConceptId) => void;
   startSuite: (startConceptId?: InteractiveConceptId | null) => void;
-  playVariant: (variant: PlaybackVariant) => Promise<void>;
+  playVariant: (variant: PlaybackVariant, optionDeltaDb?: number) => Promise<void>;
   submitAnswer: (answer: InteractiveAnswerInput) => void;
   skipTrial: () => void;
   moveToNextConcept: () => void;
@@ -247,11 +247,11 @@ export function useInteractiveConceptSuite(): InteractiveConceptSuiteController 
   );
 
   const playVariant = useCallback(
-    async (variant: PlaybackVariant) => {
+    async (variant: PlaybackVariant, optionDeltaDb?: number) => {
       if (!currentTrial) {
         return;
       }
-      await audioRef.current.playTrial(currentTrial, variant);
+      await audioRef.current.playTrial(currentTrial, variant, optionDeltaDb);
       setAudioReady(true);
       setCurrentReplayCount((v) => v + 1);
     },

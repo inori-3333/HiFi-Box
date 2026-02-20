@@ -3,7 +3,7 @@ import { conceptScore, round1, scoreHigherBetter } from "../scoring";
 import type { InteractiveConceptDefinition, InteractiveConceptResult, InteractiveTrial } from "../types";
 import { accuracyPercent, meanOf, scoredTrials, summarizeConfidence } from "./helpers";
 
-const RANGE_STEPS = [12, 16, 20, 24, 28, 32];
+const RANGE_STEPS = [10, 14, 18, 22, 26, 30, 34, 38];
 
 export const dynamicConcept: InteractiveConceptDefinition = {
   id: "dynamic",

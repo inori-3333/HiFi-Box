@@ -556,14 +556,18 @@ export class InteractiveAudioEngine {
     }
   }
 
-  async playTrial(trial: InteractiveTrial, variant: PlaybackVariant): Promise<void> {
+  async playTrial(trial: InteractiveTrial, variant: PlaybackVariant, optionDeltaDb?: number): Promise<void> {
     const ctx = await this.ensureReady();
     this.stopCurrent();
 
     switch (trial.concept) {
       case "ild": {
-        const deltaDb = variant === "a" ? 0 : getNum(trial, "delta_db", 0);
         const freq = getNum(trial, "reference_freq_hz", 900);
+        // 优先使用传入的optionDeltaDb（练习选项），否则从payload获取
+        const defaultDeltaDb = optionDeltaDb !== undefined
+          ? optionDeltaDb
+          : getNum(trial, "delta_db", 0);
+        const deltaDb = variant === "a" ? 0 : defaultDeltaDb;
         const gainDelta = dbToGain(Math.abs(deltaDb));
         const dominant = 0.4;
         const recessive = 0.4 / gainDelta;

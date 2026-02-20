@@ -1,5 +1,6 @@
 import type React from "react";
 import { useState, useRef, useCallback } from "react";
+import type { CSSProperties } from "react";
 import { useSoundField } from "../soundfield/useSoundField";
 import type { SoundFieldPoint, SoundFieldDimension } from "../soundfield/soundfield-core";
 import { BENCHMARK_POINTS, ROUND_COLORS } from "../soundfield/soundfield-core";
@@ -17,8 +18,8 @@ const DIMENSION_NAMES: Record<SoundFieldDimension, string> = {
   immersion: "沉浸感"
 };
 
-// 基准点名称映射
-const BENCHMARK_NAMES = ["原点", "左", "右", "后", "前", "下", "上"];
+// 基准点名称映射（1个点：中心点）
+const BENCHMARK_NAMES = ["原点"];
 
 // 3D Scene constants
 const CUBE_SIZE = 280; // px
@@ -30,6 +31,24 @@ function toCSSPosition(point: SoundFieldPoint): { x: string; y: string; z: strin
     x: `${point.x * HALF_CUBE}px`,
     y: `${-point.y * HALF_CUBE}px`, // Y axis in CSS goes down, spatial Y goes up
     z: `${point.z * HALF_CUBE}px`
+  };
+}
+
+// Position offset to fix display alignment (correct origin is at offset from current display)
+const OFFSET_X = -1 * HALF_CUBE; // -140px (原点显示在x=-1)
+const OFFSET_Y = 1 * HALF_CUBE;  // +140px (原点显示在y=-1，即后方)
+const OFFSET_Z = 0;
+
+// Generate transform style for 3D positioning (direct style, no CSS vars)
+function toTransformStyle(point: SoundFieldPoint, extra?: CSSProperties): CSSProperties {
+  const pos = toCSSPosition(point);
+  // Apply offset to fix display alignment
+  const x = parseFloat(pos.x) + OFFSET_X;
+  const y = parseFloat(pos.y) + OFFSET_Y;
+  const z = parseFloat(pos.z) + OFFSET_Z;
+  return {
+    transform: `translate(-50%, -50%) translate3d(${x}px, ${y}px, ${z}px)`,
+    ...extra
   };
 }
 
@@ -337,16 +356,12 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             <div className="listener-position" />
             <div className="listener-head" />
 
-            {/* 7个基准点（半透明灰色小球） */}
+            {/* 基准点（半透明灰色小球） */}
             {BENCHMARK_POINTS.map(({ point }, idx) => (
               <div
                 key={`benchmark-${idx}`}
                 className={`spatial-dot-3d benchmark-dot ${calibrationStep === idx && isCalibrating ? "active" : ""}`}
-                style={{
-                  ["--x" as string]: toCSSPosition(point).x,
-                  ["--y" as string]: toCSSPosition(point).y,
-                  ["--z" as string]: toCSSPosition(point).z
-                }}
+                style={toTransformStyle(point)}
                 title={BENCHMARK_NAMES[idx]}
               />
             ))}
@@ -355,26 +370,19 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
             {hasSession && positioningSession!.target && positioningPhase === "saved" && (
               <div
                 className="spatial-dot-3d spatial-dot-3d-target"
-                style={{
-                  ["--x" as string]: toCSSPosition(positioningSession!.target).x,
-                  ["--y" as string]: toCSSPosition(positioningSession!.target).y,
-                  ["--z" as string]: toCSSPosition(positioningSession!.target).z
-                }}
+                style={toTransformStyle(positioningSession!.target)}
                 title="测试音实际位置"
               />
             )}
 
             {/* 用户当前选择位置（蓝色预览球，可拖动） */}
             {hasSession && (positioningPhase === "guessing" || positioningPhase === "playing") && (
-              <div
-                className="spatial-dot-3d user-guess-dot"
-                style={{
-                  ["--x" as string]: toCSSPosition(currentGuess).x,
-                  ["--y" as string]: toCSSPosition(currentGuess).y,
-                  ["--z" as string]: toCSSPosition(currentGuess).z
-                }}
-                title="你的选择"
-              />
+              <div style={toTransformStyle(currentGuess)}>
+                <div
+                  className="spatial-dot-3d user-guess-dot"
+                  title="你的选择"
+                />
+              </div>
             )}
 
             {/* 历史轮次结果（不同颜色） */}
@@ -383,12 +391,9 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
                 <div
                   key={`round-${round.roundId}`}
                   className="spatial-dot-3d round-history-dot"
-                  style={{
-                    ["--x" as string]: toCSSPosition(round.userGuess).x,
-                    ["--y" as string]: toCSSPosition(round.userGuess).y,
-                    ["--z" as string]: toCSSPosition(round.userGuess).z,
-                    ["--round-color" as string]: ROUND_COLORS[(round.roundId - 1) % ROUND_COLORS.length]
-                  }}
+                  style={toTransformStyle(round.userGuess, {
+                    "--round-color": ROUND_COLORS[(round.roundId - 1) % ROUND_COLORS.length]
+                  } as CSSProperties)}
                   title={`第${round.roundId}轮: 误差${round.error.toFixed(3)}`}
                 />
               ) : null
@@ -590,9 +595,9 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
           <div className="calibration-progress">
             <div
               className="calibration-progress-bar"
-              style={{ width: `${((calibrationStep + 1) / 7) * 100}%` }}
+              style={{ width: `${((calibrationStep + 1) / BENCHMARK_NAMES.length) * 100}%` }}
             />
-            <span className="calibration-text">正在校准: {BENCHMARK_NAMES[calibrationStep]} ({calibrationStep + 1}/7)</span>
+            <span className="calibration-text">正在校准: {BENCHMARK_NAMES[calibrationStep]} ({calibrationStep + 1}/{BENCHMARK_NAMES.length})</span>
           </div>
         )}
       </div>
@@ -738,7 +743,7 @@ export function SoundFieldStage(props: SoundFieldStageProps) {
 
         <p className="hint">
           {positioningPhase === "idle" && "点击'开始测试'初始化测试环境"}
-          {positioningPhase === "calibrating" && "正在播放7个基准音进行校准..."}
+          {positioningPhase === "calibrating" && "正在播放基准音进行校准..."}
           {positioningPhase === "playing" && "聆听测试旋律，判断其空间位置"}
           {positioningPhase === "guessing" && "调整XYZ滑块标记感知位置，然后保存"}
           {positioningPhase === "saved" && "可选择重新测试（同位置）或生成新位置"}

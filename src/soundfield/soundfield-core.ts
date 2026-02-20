@@ -64,15 +64,10 @@ export const SOUNDFIELD_TOTAL_TRIALS = 12; // 4 dimensions x 3 trials
 
 const MAX_DISTANCE = Math.sqrt(3); // 3D空间最大距离
 
-// 7个基准点坐标（用于定点定位校准）
+// 1个基准点校准系统（仅中心点）
 export const BENCHMARK_POINTS: { point: SoundFieldPoint; name: string }[] = [
-  { point: { x: 0, y: 0, z: 0 }, name: "原点" },
-  { point: { x: -1, y: 0, z: 0 }, name: "左" },
-  { point: { x: 1, y: 0, z: 0 }, name: "右" },
-  { point: { x: 0, y: -1, z: 0 }, name: "后" },
-  { point: { x: 0, y: 1, z: 0 }, name: "前" },
-  { point: { x: 0, y: 0, z: -1 }, name: "下" },
-  { point: { x: 0, y: 0, z: 1 }, name: "上" }
+  // 中心点
+  { point: { x: 0, y: 0, z: 0 }, name: "原点" }
 ];
 
 // 轮次颜色方案
@@ -388,7 +383,7 @@ export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// 播放7个基准音（校准阶段）
+// 播放基准音（校准阶段）
 export async function playCalibrationTones(
   ctx: AudioContext,
   onProgress: (step: number, point: SoundFieldPoint, name: string) => void,

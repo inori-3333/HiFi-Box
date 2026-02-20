@@ -25,6 +25,12 @@ export type InteractiveChoice = "a" | "b" | "left" | "right" | "center";
 
 export type TrialPayloadValue = string | number | boolean;
 
+export type PracticeOption = {
+  label: string;
+  value: string;
+  delta_db: number;
+};
+
 export type InteractiveTrial = {
   id: string;
   concept: InteractiveConceptId;
@@ -33,6 +39,7 @@ export type InteractiveTrial = {
   instruction: string;
   expected_choice?: InteractiveChoice;
   payload: Record<string, TrialPayloadValue>;
+  practice_options?: PracticeOption[];
 };
 
 export type InteractiveAnswerInput = {

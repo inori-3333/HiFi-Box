@@ -4,11 +4,14 @@ import type { InteractiveConceptDefinition, InteractiveConceptResult, Interactiv
 import { accuracyPercent, scoredTrials, summarizeConfidence } from "./helpers";
 
 const TREBLE_PAIRS: Array<{ bright: number; dull: number }> = [
-  { bright: 19500, dull: 12000 },
-  { bright: 18200, dull: 11000 },
-  { bright: 16800, dull: 9800 },
-  { bright: 17500, dull: 10500 },
-  { bright: 20500, dull: 12800 }
+  { bright: 14000, dull: 8500 },
+  { bright: 15500, dull: 9500 },
+  { bright: 16800, dull: 10500 },
+  { bright: 17800, dull: 11200 },
+  { bright: 18800, dull: 11800 },
+  { bright: 19800, dull: 12500 },
+  { bright: 20800, dull: 13200 },
+  { bright: 21800, dull: 14000 }
 ];
 
 export const trebleConcept: InteractiveConceptDefinition = {

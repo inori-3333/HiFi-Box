@@ -3,7 +3,7 @@ import { conceptScore, round1, scoreHigherBetter } from "../scoring";
 import type { InteractiveConceptDefinition, InteractiveConceptResult, InteractiveTrial } from "../types";
 import { accuracyPercent, scoredTrials, summarizeConfidence } from "./helpers";
 
-const BPM_STEPS = [120, 150, 180, 210, 240];
+const BPM_STEPS = [100, 130, 160, 190, 220, 250, 280, 310];
 
 export const transientConcept: InteractiveConceptDefinition = {
   id: "transient",

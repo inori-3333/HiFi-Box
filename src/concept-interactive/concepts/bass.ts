@@ -4,11 +4,14 @@ import type { InteractiveConceptDefinition, InteractiveConceptResult, Interactiv
 import { accuracyPercent, scoredTrials, summarizeConfidence } from "./helpers";
 
 const PAIRS: Array<{ deep: number; shallow: number }> = [
-  { deep: 30, shallow: 65 },
-  { deep: 35, shallow: 72 },
-  { deep: 42, shallow: 80 },
-  { deep: 38, shallow: 70 },
-  { deep: 45, shallow: 88 }
+  { deep: 28, shallow: 55 },
+  { deep: 32, shallow: 62 },
+  { deep: 35, shallow: 68 },
+  { deep: 38, shallow: 75 },
+  { deep: 42, shallow: 82 },
+  { deep: 46, shallow: 90 },
+  { deep: 50, shallow: 95 },
+  { deep: 55, shallow: 100 }
 ];
 
 export const bassConcept: InteractiveConceptDefinition = {

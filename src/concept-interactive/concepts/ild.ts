@@ -3,7 +3,7 @@ import { conceptScore, mean, round1, scoreHigherBetter, scoreLowerBetter } from 
 import type { InteractiveConceptDefinition, InteractiveConceptResult, InteractiveTrial } from "../types";
 import { accuracyPercent, scoredTrials, summarizeConfidence } from "./helpers";
 
-const DELTA_SERIES_DB = [0.4, 0.8, 1.2, 2.0, 3.2];
+const DELTA_SERIES_DB = [0.3, 0.5, 0.8, 1.2, 1.8, 2.4, 3.2, 4.0];
 
 export const ildConcept: InteractiveConceptDefinition = {
   id: "ild",
@@ -32,13 +32,18 @@ export const ildConcept: InteractiveConceptDefinition = {
       id: "ild-p-1",
       concept: "ild",
       phase: "practice",
-      prompt: "练习题：A是居中，B轻微偏左。",
-      instruction: "先熟悉操作，练习题不计入最终得分。",
-      expected_choice: "left",
+      prompt: "练习题：选择下列选项体验不同声压差。",
+      instruction: "点击按钮播放对应偏差的音频，熟悉不同声压差的感觉。练习题不计入最终得分。",
       payload: {
-        delta_db: -1.2,
         reference_freq_hz: 900
-      }
+      },
+      practice_options: [
+        { label: "无偏差（居中）", value: "center", delta_db: 0 },
+        { label: "相差0.5dB偏左", value: "left_0.5", delta_db: -0.5 },
+        { label: "相差1dB偏右", value: "right_1", delta_db: 1 },
+        { label: "相差2dB偏左", value: "left_2", delta_db: -2 },
+        { label: "相差5dB偏右", value: "right_5", delta_db: 5 }
+      ]
     };
 
     return [practice, ...rng.shuffle(scored)];

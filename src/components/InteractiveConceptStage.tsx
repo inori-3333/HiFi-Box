@@ -5,7 +5,8 @@ import {
   type InteractiveChoice,
   type InteractiveConceptId,
   type InteractiveConceptMetrics,
-  type PlaybackVariant
+  type PlaybackVariant,
+  type PracticeOption
 } from "../concept-interactive/types";
 
 type InteractiveConceptStageProps = {
@@ -86,6 +87,7 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
   const [sepB, setSepB] = useState(0.4);
   const [dynamicLevels, setDynamicLevels] = useState(3);
   const [densityRating, setDensityRating] = useState(6);
+  const [selectedPracticeOption, setSelectedPracticeOption] = useState<PracticeOption | undefined>(undefined);
 
   const currentTrial = suite.currentTrial;
   const activeConcept = suite.currentConceptId ?? selectedConcept;
@@ -98,6 +100,7 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
     setSepB(0.4);
     setDynamicLevels(3);
     setDensityRating(6);
+    setSelectedPracticeOption(undefined);
   }, [suite.currentTrialIndex, suite.currentConceptId]);
 
   useEffect(() => {
@@ -155,6 +158,10 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
     if (!currentTrial) {
       return false;
     }
+    // 练习题有特殊选项时，允许直接提交（仅体验）
+    if (currentTrial.practice_options && currentTrial.phase === "practice") {
+      return true;
+    }
     if (currentTrial.concept === "separation") {
       return true;
     }
@@ -181,6 +188,30 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
   function renderAnswerPanel() {
     if (!currentTrial) {
       return <p className="hint">当前无题目。</p>;
+    }
+
+    // 练习题有特殊选项（如ILD的5个偏差选项）
+    if (currentTrial.practice_options && currentTrial.phase === "practice") {
+      return (
+        <>
+          <div className="concept-lab-choice-row">
+            {currentTrial.practice_options.map((option) => (
+              <button
+                key={option.value}
+                className={selectedPracticeOption?.value === option.value ? "concept-lab-choice active" : "concept-lab-choice"}
+                onClick={() => {
+                  setSelectedPracticeOption(option);
+                  void suite.playVariant("b" as PlaybackVariant, option.delta_db);
+                }}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <p className="hint">点击按钮播放对应偏差的音频</p>
+        </>
+      );
     }
 
     if (currentTrial.concept === "ild") {
@@ -398,9 +429,11 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
               <button disabled={busy || !canSubmit()} onClick={handleSubmit}>
                 提交答案
               </button>
-              <button disabled={busy} onClick={suite.skipTrial}>
-                听不清（跳过）
-              </button>
+              {currentTrial.phase !== "practice" && (
+                <button disabled={busy} onClick={suite.skipTrial}>
+                  听不清（跳过）
+                </button>
+              )}
             </div>
           </div>
         )}
