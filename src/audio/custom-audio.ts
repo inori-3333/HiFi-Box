@@ -135,10 +135,11 @@ export function resolveTrack(
   }
 
   const file = selected.file.replace(/^\/+/, "");
+  const encodedFile = encodeURIComponent(file);
   return {
     modulePath: normalizedPath,
     file,
-    url: buildPublicUrl(`audio/${normalizedPath}/${file}`),
+    url: buildPublicUrl(`audio/${normalizedPath}/${encodedFile}`),
     matchedRole
   };
 }
@@ -159,12 +160,16 @@ async function fetchFileBuffer(url: string): Promise<ArrayBuffer | null> {
       url,
       (async () => {
         try {
+          console.log(`[CustomAudio] Fetching: ${url}`);
           const response = await fetch(url);
           if (!response.ok) {
+            console.log(`[CustomAudio] Fetch failed: ${url}, status: ${response.status}`);
             return null;
           }
+          console.log(`[CustomAudio] Fetch success: ${url}`);
           return await response.arrayBuffer();
-        } catch {
+        } catch (e) {
+          console.log(`[CustomAudio] Fetch error: ${url}`, e);
           return null;
         }
       })()
@@ -184,11 +189,16 @@ async function decodeFileBuffer(ctx: AudioContext, url: string): Promise<AudioBu
       (async () => {
         const raw = await fetchFileBuffer(url);
         if (!raw) {
+          console.log(`[CustomAudio] No raw data for: ${url}`);
           return null;
         }
         try {
-          return await ctx.decodeAudioData(raw.slice(0));
-        } catch {
+          console.log(`[CustomAudio] Decoding audio: ${url}, size: ${raw.byteLength} bytes`);
+          const decoded = await ctx.decodeAudioData(raw.slice(0));
+          console.log(`[CustomAudio] Decode success: ${url}, duration: ${decoded.duration}s, channels: ${decoded.numberOfChannels}`);
+          return decoded;
+        } catch (e) {
+          console.log(`[CustomAudio] Decode error: ${url}`, e);
           return null;
         }
       })()

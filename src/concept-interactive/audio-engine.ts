@@ -540,8 +540,10 @@ function createBufferedSource(ctx: AudioContext, buffer: AudioBuffer, durationSe
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   source.loop = buffer.duration < durationSec + 0.05;
-  source.start();
-  source.stop(ctx.currentTime + durationSec + 0.02);
+  const now = ctx.currentTime;
+  console.log(`[AudioEngine] Starting audio source: duration=${buffer.duration}s, playing for ${durationSec}s, loop=${source.loop}, currentTime=${now}`);
+  source.start(now);
+  source.stop(now + durationSec + 0.02);
   return source;
 }
 
@@ -561,19 +563,36 @@ function stopAndDisconnect(node: AudioNode | AudioScheduledSourceNode): void {
 }
 
 function playDirectBufferClip(ctx: AudioContext, buffer: AudioBuffer, durationSec = 1.05): StopHandle {
-  const source = createBufferedSource(ctx, buffer, durationSec);
+  console.log(`[AudioEngine] playDirectBufferClip: buffer duration=${buffer.duration}s, sampleRate=${buffer.sampleRate}, channels=${buffer.numberOfChannels}, ctx.state=${ctx.state}`);
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const now = ctx.currentTime;
+
+  // 播放音频的第5-10秒（offset=5, duration=5）
+  const startOffset = 5.0;
+  const playDuration = 5.0;
+  const actualDuration = Math.min(playDuration, buffer.duration - startOffset);
+
+  source.start(now, startOffset, actualDuration + 0.02);
+  console.log(`[AudioEngine] Source started at ${now}, offset=${startOffset}s, duration=${actualDuration}s`);
+
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.45, ctx.currentTime + 0.02);
-  gain.gain.setValueAtTime(0.45, ctx.currentTime + durationSec * 0.85);
-  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + durationSec);
+  // 增大初始音量和淡入时间，使声音更明显
+  gain.gain.setValueAtTime(0.001, now);
+  gain.gain.exponentialRampToValueAtTime(0.8, now + 0.05);
+  gain.gain.setValueAtTime(0.8, now + actualDuration * 0.9);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + actualDuration);
+
   source.connect(gain);
   gain.connect(ctx.destination);
+  console.log(`[AudioEngine] Audio graph connected with higher gain (0.8), scheduled ${now} to ${now + actualDuration}`);
+
   const cleanup = () => {
+    console.log(`[AudioEngine] Cleanup called`);
     stopAndDisconnect(source);
     stopAndDisconnect(gain);
   };
-  const tid = scheduleCleanup(ctx, durationSec, cleanup);
+  const tid = scheduleCleanup(ctx, actualDuration, cleanup);
   return {
     stop: () => {
       window.clearTimeout(tid);
@@ -841,9 +860,12 @@ export class InteractiveAudioEngine {
   async ensureReady(): Promise<AudioContext> {
     if (!this.context) {
       this.context = new AudioContext();
+      console.log(`[AudioEngine] AudioContext created, state: ${this.context.state}`);
     }
     if (this.context.state === "suspended") {
+      console.log(`[AudioEngine] Resuming AudioContext...`);
       await this.context.resume();
+      console.log(`[AudioEngine] AudioContext resumed, state: ${this.context.state}`);
     }
     return this.context;
   }
@@ -865,6 +887,7 @@ export class InteractiveAudioEngine {
     variant: PlaybackVariant
   ): Promise<{ direct: AudioBuffer | null; base: AudioBuffer | null }> {
     const modulePath = this.conceptModulePath(trial);
+    console.log(`[AudioEngine] Loading audio for ${trial.concept}, variant: ${variant}, modulePath: ${modulePath}`);
     const roleByVariant: Record<PlaybackVariant, string[]> = {
       a: ["variant:a", "a"],
       b: ["variant:b", "b"],
@@ -872,10 +895,12 @@ export class InteractiveAudioEngine {
       single: ["variant:single", "single"]
     };
     const direct = await loadBuffer(ctx, modulePath, roleByVariant[variant]);
+    console.log(`[AudioEngine] Direct load result:`, { found: !!direct.buffer, fallbackReason: direct.fallbackReason, source: direct.source });
     if (direct.buffer) {
       return { direct: direct.buffer, base: null };
     }
     const base = await loadBuffer(ctx, modulePath, ["base", "default"]);
+    console.log(`[AudioEngine] Base load result:`, { found: !!base.buffer, fallbackReason: base.fallbackReason, source: base.source });
     return { direct: null, base: base.buffer ?? null };
   }
 
@@ -957,11 +982,13 @@ export class InteractiveAudioEngine {
         const bpm = getNum(trial, "bpm", 160);
         const attack = getNum(trial, variant === "a" ? "a_attack_ms" : "b_attack_ms", 10);
         const decay = getNum(trial, variant === "a" ? "a_decay_ms" : "b_decay_ms", 80);
+        console.log(`[AudioEngine] Transient playback: direct=${!!custom.direct}, base=${!!custom.base}, bpm=${bpm}, attack=${attack}ms, decay=${decay}ms`);
         this.active = custom.direct
           ? playDirectBufferClip(ctx, custom.direct, 1.1)
           : custom.base
             ? playBufferedTransientClip(ctx, custom.base, bpm, attack, decay)
             : playTransientClip(ctx, bpm, attack, decay);
+        console.log(`[AudioEngine] Transient playback started, active=`, !!this.active);
         break;
       }
       case "dynamic": {

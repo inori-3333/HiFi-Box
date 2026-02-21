@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Play, RotateCcw, ArrowLeft, Volume2, SkipForward, CheckCircle } from "lucide-react";
 import { INTERACTIVE_CONCEPTS } from "../concept-interactive/concepts";
 import { useInteractiveConceptSuite } from "../concept-interactive/useInteractiveConceptSuite";
 import {
@@ -174,7 +175,7 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
         {values.map((value) => (
           <button
             key={value}
-            className={choice === value ? "concept-lab-choice active" : "concept-lab-choice"}
+            className={choice === value ? "btn concept-choice-btn active" : "btn concept-choice-btn"}
             onClick={() => setChoice(value)}
             type="button"
           >
@@ -198,7 +199,7 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
             {currentTrial.practice_options.map((option) => (
               <button
                 key={option.value}
-                className={selectedPracticeOption?.value === option.value ? "concept-lab-choice active" : "concept-lab-choice"}
+                className={selectedPracticeOption?.value === option.value ? "btn concept-choice-btn active" : "btn concept-choice-btn"}
                 onClick={() => {
                   setSelectedPracticeOption(option);
                   void suite.playVariant("b" as PlaybackVariant, option.delta_db);
@@ -368,97 +369,134 @@ export function InteractiveConceptStage(props: InteractiveConceptStageProps) {
   }
 
   return (
-    <section className="grid">
-      <div className="card concept-lab-sidebar">
-        <h2>{INTERACTIVE_CONCEPTS[initialConcept].label}</h2>
-        <p className="hint">听音-作答-反馈</p>
-        <p className="hint">{conceptDescription(selectedConcept)}</p>
-
-        <div className="row">
-          <button disabled={busy} onClick={startCurrentConcept}>
+    <section className="concept-lab-container">
+      {/* 顶部标题栏 - 居中对称 */}
+      <div className="card concept-lab-header">
+        <div className="concept-lab-title">
+          <h2>{INTERACTIVE_CONCEPTS[initialConcept].label}</h2>
+          <p className="concept-lab-subtitle">{conceptDescription(selectedConcept)}</p>
+        </div>
+        <div className="concept-lab-top-actions">
+          <button className="btn btn-primary" disabled={busy} onClick={startCurrentConcept}>
+            <Play size={16} />
             开始测试
           </button>
           <button
+            className="btn btn-secondary"
             disabled={busy}
             onClick={() => {
               suite.stopPlayback();
               suite.restart();
             }}
           >
-            重置会话
+            <RotateCcw size={16} />
+            重置
           </button>
           <button
+            className="btn btn-ghost"
             disabled={busy}
             onClick={() => {
               suite.stopPlayback();
               onBackHome();
             }}
           >
-            返回首页
+            <ArrowLeft size={16} />
+            返回
           </button>
         </div>
-
-        <div className="concept-lab-overall">
-          <p>音频状态：{suite.audioReady ? "已解锁" : "未解锁"}</p>
-        </div>
       </div>
 
-      <div className="card concept-lab-main">
-        <h2>{suite.currentConceptId ? conceptLabel(suite.currentConceptId) : "等待开始"}</h2>
-
-        {currentTrial && (
-          <div className="concept-lab-trial">
-            <p className="concept-lab-phase">
-              {currentTrial.phase === "practice" ? "练习题" : "计分题"} | 题目 {suite.currentTrialIndex + 1}/{suite.currentTrials.length}
-            </p>
-            <p>{currentTrial.prompt}</p>
-            <p className="hint">{currentTrial.instruction}</p>
-
-            <div className="concept-lab-play-row">
-              {playbackOptions.map((variant) => (
-                <button key={variant} type="button" onClick={() => void suite.playVariant(variant)}>
-                  {variant === "single" ? "播放测试片段" : `播放 ${variant.toUpperCase()}`}
-                </button>
-              ))}
-              <span className="hint">本题播放次数：{suite.currentReplayCount}</span>
+      {/* 主要内容区域 - 居中 */}
+      <div className="card concept-lab-content">
+        {suite.phase === "idle" ? (
+          <div className="concept-lab-idle">
+            <div className="concept-lab-idle-icon">
+              <Play size={48} />
             </div>
-
-            <div className="concept-lab-answer">{renderAnswerPanel()}</div>
-
-            <div className="row">
-              <button disabled={busy || !canSubmit()} onClick={handleSubmit}>
-                提交答案
-              </button>
-              {currentTrial.phase !== "practice" && (
-                <button disabled={busy} onClick={suite.skipTrial}>
-                  听不清（跳过）
-                </button>
+            <h3>准备开始测试</h3>
+            <p className="hint">点击上方"开始测试"按钮开始</p>
+          </div>
+        ) : (
+          <>
+            <div className="concept-lab-status-bar">
+              <span className="concept-lab-status-badge">
+                {suite.currentConceptId ? conceptLabel(suite.currentConceptId) : "等待开始"}
+              </span>
+              {currentTrial && (
+                <span className="concept-lab-progress">
+                  {currentTrial.phase === "practice" ? "练习题" : "计分题"} | 题目 {suite.currentTrialIndex + 1}/{suite.currentTrials.length}
+                </span>
               )}
+              <span className={`concept-lab-audio-status ${suite.audioReady ? "ready" : ""}`}>
+                {suite.audioReady ? "音频已解锁" : "音频未解锁"}
+              </span>
             </div>
-          </div>
-        )}
 
+            {currentTrial && (
+              <div className="concept-lab-trial">
+                <p className="concept-lab-prompt">{currentTrial.prompt}</p>
+                <p className="concept-lab-instruction">{currentTrial.instruction}</p>
 
-        {currentResult && (
-          <div className="concept-lab-result">
-            <h3>当前概念结果</h3>
-            <p>
-              得分 {currentResult.score.toFixed(1)} | 置信度 {currentResult.confidence.toFixed(1)}
-            </p>
-            {currentResult.notes.map((note) => (
-              <p className="hint" key={note}>
-                {note}
-              </p>
-            ))}
-            <ul>
-              {metricsLines(currentResult.metrics).map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-          </div>
+                <div className="concept-lab-play-row">
+                  {playbackOptions.map((variant) => (
+                    <button
+                      key={variant}
+                      type="button"
+                      className="btn btn-secondary concept-play-btn"
+                      onClick={() => void suite.playVariant(variant)}
+                    >
+                      <Volume2 size={16} />
+                      {variant === "single" ? "播放测试片段" : `播放 ${variant.toUpperCase()}`}
+                    </button>
+                  ))}
+                  <span className="hint">本题播放次数：{suite.currentReplayCount}</span>
+                </div>
+
+                <div className="concept-lab-answer">{renderAnswerPanel()}</div>
+
+                <div className="concept-lab-submit-row">
+                  <button className="btn btn-primary" disabled={busy || !canSubmit()} onClick={handleSubmit}>
+                    <CheckCircle size={16} />
+                    提交答案
+                  </button>
+                  {currentTrial.phase !== "practice" && (
+                    <button className="btn btn-ghost" disabled={busy} onClick={suite.skipTrial}>
+                      <SkipForward size={16} />
+                      听不清（跳过）
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {currentResult && (
+              <div className="concept-lab-result">
+                <h3>当前概念结果</h3>
+                <div className="concept-lab-score-row">
+                  <div className="concept-lab-score-item">
+                    <span className="score-label">得分</span>
+                    <span className="score-value">{currentResult.score.toFixed(1)}</span>
+                  </div>
+                  <div className="concept-lab-score-item">
+                    <span className="score-label">置信度</span>
+                    <span className="score-value">{currentResult.confidence.toFixed(1)}</span>
+                  </div>
+                </div>
+                {currentResult.notes.map((note) => (
+                  <p className="hint" key={note}>
+                    {note}
+                  </p>
+                ))}
+                <ul className="concept-lab-metrics">
+                  {metricsLines(currentResult.metrics).map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
         )}
       </div>
-
     </section>
   );
 }
